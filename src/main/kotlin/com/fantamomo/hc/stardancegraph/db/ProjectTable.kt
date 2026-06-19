@@ -16,9 +16,9 @@ object ProjectTable : Table("projects") {
     val devlogCount = integer("devlogCount").nullable()
     val totalHours = integer("totalHours").nullable()
 
-    val firstSeen = timestamp("firstSeen")
-    val lastRequested = timestamp("lastRequested").nullable()
-    val lastRequestedIteration = integer("last_requested_iteration").nullable()
+    val firstSeen = timestamp("first_seen")
+    val lastRequested = timestamp("last_requested").nullable()
+    val lastRequestedIteration = reference("last_requested_iteration", RequestIterationsTable.id).nullable()
 
     override val primaryKey = PrimaryKey(id)
 }

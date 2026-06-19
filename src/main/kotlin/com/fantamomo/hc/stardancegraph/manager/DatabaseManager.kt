@@ -17,7 +17,7 @@ object DatabaseManager {
 
     private const val MIGRATION_FOLDER_PATH = "db/migration"
     private const val CREATE_TABLE_DB_MIGRATIONS_FILE_NAME =
-        "V20260619070223__CREATE_TABLE_MIGRATION.sql"
+        "V20260619144440__CREATE_TABLE_MIGRATION.sql"
 
     private val logger = Logger()
 
