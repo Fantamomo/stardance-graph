@@ -1,5 +1,5 @@
 plugins {
-    kotlin("jvm") version "2.3.21"
+    kotlin("jvm") version "2.4.0"
     alias(libs.plugins.kotlin.serialization)
     id("org.jetbrains.exposed.plugin") version "1.3.0"
 }

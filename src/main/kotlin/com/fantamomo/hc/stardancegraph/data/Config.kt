@@ -1,6 +1,6 @@
 package com.fantamomo.hc.stardancegraph.data
 
-import org.slf4j.LoggerFactory
+import com.fantamomo.hc.stardancegraph.util.Logger
 import java.io.IOException
 import java.nio.file.Path
 import java.util.*
@@ -9,7 +9,7 @@ import kotlin.properties.ReadOnlyProperty
 
 @Suppress("SameParameterValue")
 object Config {
-    private val logger = LoggerFactory.getLogger(Config::class.java)
+    private val logger = Logger()
 
     private val configPath: Path =
         Path(System.getProperty("di-config-path") ?: "config.properties")
@@ -51,11 +51,19 @@ object Config {
         canBeSetByEnv = true
     )
 
+    val ENVIRONMENT by string(
+        key = "environment",
+        default = "production",
+        description = "The environment the application is running in."
+    )
+
     fun init() {
         if (properties.isNotEmpty()) return
         ensureConfigExists()
         loadProperties()
         validateAndLoad()
+
+        if (ENVIRONMENT.length > 10) throw IllegalArgumentException("Environment name too long, max 10 chars.")
     }
 
     private fun string(
@@ -159,9 +167,7 @@ object Config {
             val rawValue = properties.getProperty(entry.key)?.replace("\r", "\\")
 
             if (rawValue == null) {
-
                 if (entry.default != null) {
-
                     logger.warn(
                         "Missing config '{}'. Using default '{}'. Description: {}",
                         entry.key,
@@ -185,9 +191,7 @@ object Config {
             try {
                 val parsed = entry.parser(rawValue.trim())
                 entry.setValue(parsed)
-
             } catch (ex: Exception) {
-
                 errors += buildString {
                     appendLine("Invalid configuration value.")
                     appendLine("Key: ${entry.key}")
@@ -214,7 +218,6 @@ object Config {
     }
 
     private fun ensureConfigExists() {
-
         if (configPath.exists()) {
             return
         }
@@ -227,12 +230,10 @@ object Config {
         configPath.parent?.createDirectories()
 
         val defaultConfig = buildString {
-
             appendLine("# MapGit Configuration")
             appendLine()
 
             for (entry in entries) {
-
                 appendLine("# ${entry.description}")
 
                 if (entry.default != null) {
@@ -246,7 +247,6 @@ object Config {
         }
 
         try {
-
             configPath.outputStream().bufferedWriter().use {
                 it.write(defaultConfig)
             }
@@ -255,9 +255,7 @@ object Config {
                 "Created default config at '{}'.",
                 configPath.absolutePathString()
             )
-
         } catch (ex: IOException) {
-
             throw IllegalStateException(
                 "Failed to create config file at '${configPath.absolutePathString()}'.",
                 ex

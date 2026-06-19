@@ -2,16 +2,15 @@ package com.fantamomo.hc.stardancegraph.manager
 
 import com.fantamomo.hc.stardancegraph.data.Config
 import com.fantamomo.hc.stardancegraph.db.MigrationTable
+import com.fantamomo.hc.stardancegraph.util.Logger
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.r2dbc.*
 import org.jetbrains.exposed.v1.r2dbc.transactions.suspendTransaction
-import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.URLDecoder
 import java.util.jar.JarFile
 import kotlin.time.Clock
-import kotlin.time.Duration
 import kotlin.time.measureTime
 
 object DatabaseManager {
@@ -20,7 +19,7 @@ object DatabaseManager {
     private const val CREATE_TABLE_DB_MIGRATIONS_FILE_NAME =
         "V20260619070223__CREATE_TABLE_MIGRATION.sql"
 
-    private val logger = LoggerFactory.getLogger(DatabaseManager::class.java)
+    private val logger = Logger()
 
     private var db: R2dbcDatabase? = null
 
@@ -50,7 +49,6 @@ object DatabaseManager {
     }
 
     private suspend fun initTables() {
-
         logger.info("Initializing database migrations")
 
         val initMigrationTableTime = measureTime {
@@ -110,25 +108,14 @@ object DatabaseManager {
         }
 
         for ((fileName, sql) in migrations.entries.sortedBy { it.key }) {
-
             logger.info("Applying migration {}", fileName)
 
             try {
-
                 val duration = measureTime {
-
                     transaction {
-
                         exec(sql)
-
-                        MigrationTable.insert {
-                            it[migration] = fileName
-                            it[appliedAt] = Clock.System.now()
-                            it[took] = Duration.ZERO
-                        }
                     }
                 }
-
                 transaction {
                     MigrationTable.insert {
                         it[migration] = fileName
@@ -136,21 +123,17 @@ object DatabaseManager {
                         it[took] = duration
                     }
                 }
-
                 logger.info(
                     "Migration {} applied in {} ms",
                     fileName,
                     duration.inWholeMilliseconds
                 )
-
             } catch (e: Exception) {
-
                 logger.error(
                     "Failed to apply migration {}",
                     fileName,
                     e
                 )
-
                 throw e
             }
         }
@@ -161,19 +144,12 @@ object DatabaseManager {
     private fun loadMigrations(
         files: List<String>
     ): Map<String, String> {
-
         val classLoader = javaClass.classLoader
 
         return buildMap {
-
             for (file in files) {
-
                 try {
-
-                    val stream = classLoader.getResourceAsStream(
-                        "$MIGRATION_FOLDER_PATH/$file"
-                    )
-
+                    val stream = classLoader.getResourceAsStream("$MIGRATION_FOLDER_PATH/$file")
                     if (stream == null) {
                         logger.error(
                             "Migration {} not found",
@@ -181,11 +157,9 @@ object DatabaseManager {
                         )
                         continue
                     }
-
                     stream.bufferedReader().use {
                         put(file, it.readText())
                     }
-
                 } catch (e: Exception) {
                     logger.error(
                         "Failed to load migration {}",
@@ -198,20 +172,13 @@ object DatabaseManager {
     }
 
     private fun loadAllMigrationFileNames(): List<String> {
-
         val result = mutableListOf<String>()
-
-        val resources =
-            javaClass.classLoader.getResources(MIGRATION_FOLDER_PATH)
+        val resources = javaClass.classLoader.getResources(MIGRATION_FOLDER_PATH)
 
         while (resources.hasMoreElements()) {
-
             val url = resources.nextElement()
-
             when (url.protocol) {
-
                 "jar" -> {
-
                     val path = url.path
                         .removePrefix("file:")
                         .substringBefore("!")
@@ -219,7 +186,6 @@ object DatabaseManager {
                     JarFile(
                         URLDecoder.decode(path, "UTF-8")
                     ).use { jar ->
-
                         jar.entries()
                             .asSequence()
                             .filter {
@@ -237,11 +203,9 @@ object DatabaseManager {
                 }
 
                 "file" -> {
-
                     val file = File(
                         url.path.removePrefix("file:")
                     )
-
                     if (!file.isDirectory) continue
 
                     file.listFiles()
