@@ -33,4 +33,6 @@ object DevlogTable : Table("posts") {
     // those could possibly always be null if the devlog never gets comments
     val lastRequested = timestamp("last_requested").nullable()
     val lastRequestedIteration = reference("last_requested_iteration", RequestIterationsTable.id).nullable()
+
+    override val primaryKey = PrimaryKey(id)
 }
