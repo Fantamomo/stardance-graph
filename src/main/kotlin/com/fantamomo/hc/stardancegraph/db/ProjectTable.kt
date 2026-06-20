@@ -11,6 +11,7 @@ object ProjectTable : Table("projects") {
     // from app/models/project.rb
     val title = varchar("title", 120).nullable()
     val description = varchar("description", 1_000).nullable()
+    val superstar = bool("superstar").nullable()
 
     val followerCount = integer("followerCount").nullable()
     val devlogCount = integer("devlogCount").nullable()

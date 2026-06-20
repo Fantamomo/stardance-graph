@@ -20,11 +20,17 @@ dependencies {
     implementation(libs.logback.classic)
     implementation(libs.postgresql)
     runtimeOnly(libs.postgresql.r2dbc)
+    implementation(ktorLibs.client.core)
+    implementation(ktorLibs.client.cio)
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0-0.6.x-compat")
+    implementation("org.jsoup:jsoup:1.22.2")
 }
 
 kotlin {
     jvmToolchain(25)
+    compilerOptions {
+        freeCompilerArgs.add("-opt-in=kotlin.concurrent.atomics.ExperimentalAtomicApi")
+    }
 }
 
 tasks.test {

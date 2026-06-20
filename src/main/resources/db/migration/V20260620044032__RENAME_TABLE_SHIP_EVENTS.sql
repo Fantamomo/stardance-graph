@@ -1,0 +1,1 @@
+ALTER TABLE shipevent RENAME TO ship_events;

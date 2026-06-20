@@ -4,7 +4,7 @@ import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.datetime.duration
 import org.jetbrains.exposed.v1.datetime.timestamp
 
-object DevlogTable : Table("posts") {
+object DevlogTable : Table("devlogs") {
     // public id in stardance
     val id = integer("id")
 

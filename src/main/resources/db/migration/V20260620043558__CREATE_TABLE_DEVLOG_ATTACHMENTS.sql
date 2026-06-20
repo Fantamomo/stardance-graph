@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS devlog_attachments (id INT, "number" INT, url VARCHAR(1000) NOT NULL, CONSTRAINT pk_devlog_attachments PRIMARY KEY (id, "number"), CONSTRAINT fk_devlog_attachments_id__id FOREIGN KEY (id) REFERENCES posts(id) ON DELETE RESTRICT ON UPDATE RESTRICT);

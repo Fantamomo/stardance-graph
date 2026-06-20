@@ -4,7 +4,8 @@ import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.datetime.timestamp
 
 object RepostTable : Table("reposts") {
-    val devlog = reference("devlog", DevlogTable.id)
+    // we cannot use a reference here because it is possible that hasn't been scraped yet
+    val devlog = integer("devlog")
     val by = reference("by", UserTable.name)
     val createdAt = timestamp("created_at")
 
