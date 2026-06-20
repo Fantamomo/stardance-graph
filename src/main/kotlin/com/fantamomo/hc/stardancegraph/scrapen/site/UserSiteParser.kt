@@ -116,8 +116,33 @@ object UserSiteParser {
         val followerCount = followList.firstOrNull { it.lowercase().contains("follower") }?.takeWhile { it.isDigit() }?.toIntOrNull()
         if (followerCount == null) logger.warn("Failed to find follower count in $url")
 
+        val achievementElement = main.selectFirst(".achievements-widget__icons")
+        if (achievementElement == null) {
+            logger.warn("Failed to find achievements section in $url")
+            return null
+        }
+        val achievements = achievementElement.select(".achievements-widget__icon").mapNotNull { it.attr("data-tooltip-message-value").ifBlank { null } }
 
-        TODO()
+        val tabContent = main.selectFirst(".profile-tab-content")
+        if (tabContent == null) {
+            logger.warn("Failed to find posts section in $url")
+            return null
+        }
+        val posts = tabContent.select("> article").mapNotNull { PostParser.parse(it, url) }
+
+        return User.ScrapedUser(
+            name = usernameText,
+            avatarUrl = avatarUrl.toString(),
+            bio = bioText ?: "",
+            devlogCount = devlogCount ?: 0,
+            projectsCount = projectCount ?: 0,
+            shipCount = shipCount ?: 0,
+            votesCount = votesCount ?: 0,
+            followerCount = followerCount ?: 0,
+            followingCount = followingCount ?: 0,
+            achievements = achievements,
+            posts = posts
+        )
     }
 
     private fun parseUnverified(unverifiedSection: Element, url: Url): User.UnverifiedUser? {
