@@ -15,7 +15,7 @@ import org.jetbrains.exposed.v1.r2dbc.select
 import org.jetbrains.exposed.v1.r2dbc.upsert
 import kotlin.time.Clock
 
-class DatabaseWriter(val channel: ReceiveChannel<Sendable>) {
+class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendable>) {
     // 0 = found, 1 = unverified, 2 = scraped
     private val existingUsers: MutableMap<String, Byte> = mutableMapOf()
     // false = found, true = scraped

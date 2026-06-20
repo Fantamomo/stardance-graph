@@ -1,5 +1,6 @@
 package com.fantamomo.hc.stardancegraph.data
 
+import com.fantamomo.hc.stardancegraph.util.statistics.network.NetworkStatsPlugin
 import com.fantamomo.hc.stardancegraph.util.statistics.requests.RequestType
 import com.fantamomo.hc.stardancegraph.util.statistics.requests.StatisticPlugin
 import io.ktor.client.*
@@ -21,5 +22,6 @@ object SharedValues {
                 RequestType.UNKNOWN
             }
         }
+        install(NetworkStatsPlugin)
     }
 }

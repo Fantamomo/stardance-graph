@@ -2,6 +2,7 @@ package com.fantamomo.hc.stardancegraph.scrapen
 
 import com.fantamomo.hc.stardancegraph.model.Scrapable
 import com.fantamomo.hc.stardancegraph.model.Sendable
+import com.fantamomo.hc.stardancegraph.scrapen.data.SiteStats
 import io.ktor.http.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -23,8 +24,10 @@ class ScrapEngine {
     // links that have already been scraped, so that we don't scrape them again
     val scrapedLinks: MutableSet<Url> = mutableSetOf()
 
-    val databaseWriter = DatabaseWriter(databaseChannel)
-    val siteScraper = SiteScraper(scraped = foundChannel, toScrap = toScrapeChannel)
+    val databaseWriter = DatabaseWriter(this, databaseChannel)
+    val siteScraper = SiteScraper(this, scraped = foundChannel, toScrap = toScrapeChannel)
+
+    val siteStats = SiteStats()
 
     suspend fun run() = coroutineScope {
         launch {
