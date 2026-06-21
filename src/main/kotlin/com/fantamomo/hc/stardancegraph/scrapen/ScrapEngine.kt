@@ -83,7 +83,10 @@ class ScrapEngine {
         currentWork.incrementAndFetch()
         biggestProjectId = 20000
         for (i in 1..20000) {
-            toScrapeChannel.send(Scrapable.Project(i))
+            val project = Scrapable.Project(i)
+            if (scrapedLinks.add(project.url)) {
+                toScrapeChannel.send(project)
+            }
         }
 
         waitForStop()
@@ -157,7 +160,7 @@ class ScrapEngine {
             if (currentWork.decrementAndFetch() == 0) {
 //                logger.info("currentWork = 0, biggestProjectId = $biggestProjectId, biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId, project404ErrorCount = $project404ErrorCount")
                 var success = false
-                if (project404ErrorCount <= 20) {
+                if (project404ErrorCount <= 100) {
                     for (i in 1..20) {
                         val nextProjectId = maxOf(biggestProjectId, biggestSuccessfullyScrapedProjectId) + 1
                         val project = Scrapable.Project(nextProjectId)
@@ -174,7 +177,7 @@ class ScrapEngine {
                         project404ErrorCount = Int.MAX_VALUE
                     }
                 }
-                if (project404ErrorCount > 20 && !success) {
+                if (project404ErrorCount > 100 && !success) {
                     logger.info("No more work, stopping")
                     try {
                         foundChannel.close()

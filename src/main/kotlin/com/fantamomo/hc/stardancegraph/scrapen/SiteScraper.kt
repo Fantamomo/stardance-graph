@@ -17,6 +17,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.atomics.decrementAndFetch
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 class SiteScraper(
@@ -54,6 +55,19 @@ class SiteScraper(
             logger.warn("Project not found: ${element.url}")
             engine.currentWork.decrementAndFetch()
             engine.project404ErrorCount++
+            return
+        }
+
+        if (response.status != HttpStatusCode.OK) {
+            if (response.status == HttpStatusCode.TooManyRequests) {
+                logger.warn("Too many requests, waiting for 5 minutes")
+            } else if (response.status.value in 500..599) {
+                logger.warn("Server error, waiting for 1 minutes: ${runCatching { response.bodyAsText() }.getOrNull()?.let { "\"$it\"" } ?: "no body"}")
+            } else {
+                logger.warn("Failed to scrape ${element.url}, status code: ${response.status}, waiting for 1 minutes")
+            }
+            waitingDelay(1.minutes)
+            engine.currentWork.decrementAndFetch()
             return
         }
         val body = try {
