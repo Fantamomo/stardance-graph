@@ -117,18 +117,23 @@ object UserSiteParser {
         if (followerCount == null) logger.warn("Failed to find follower count in $url")
 
         val achievementElement = main.selectFirst(".achievements-widget__icons")
-        if (achievementElement == null) {
-            logger.warn("Failed to find achievements section in $url")
-            return null
-        }
-        val achievements = achievementElement.select(".achievements-widget__icon").mapNotNull { it.attr("data-tooltip-message-value").ifBlank { null } }
+//        if (achievementElement == null) {
+//            logger.warn("Failed to find achievements section in $url")
+//            return null
+//        }
+        val achievements = achievementElement?.select(".achievements-widget__icon")?.mapNotNull { it.attr("data-tooltip-message-value").ifBlank { null } } ?: emptyList()
 
         val tabContent = main.selectFirst(".profile-tab-content")
         if (tabContent == null) {
             logger.warn("Failed to find posts section in $url")
             return null
         }
-        val posts = tabContent.select("> article").mapNotNull { PostParser.parse(it, url) }
+        val posts = (tabContent.selectFirst(".profile-feed-page") ?: tabContent)
+            .select("> article")
+            .mapNotNull { PostParser.parse(it, url) }
+
+        // this completely brock my code
+        val hasMorePages = main.getElementById("profile_feed_page_2") != null
 
         return User.ScrapedUser(
             name = usernameText,
@@ -141,7 +146,8 @@ object UserSiteParser {
             followerCount = followerCount ?: 0,
             followingCount = followingCount ?: 0,
             achievements = achievements,
-            posts = posts
+            posts = posts,
+            hasMorePages = hasMorePages,
         )
     }
 
@@ -151,7 +157,11 @@ object UserSiteParser {
             logger.error("Failed to find username element in $url")
             return null
         }
-        val usernameText = username.text()
+        val usernameText = username.text().removePrefix("@")
+        if (usernameText.isBlank()) {
+            logger.error("Failed to find username in $url")
+            return null
+        }
 
         val avatarUrlElement = unverifiedSection.selectFirst(".profile-placeholder__avatar")
         if (avatarUrlElement == null) {
@@ -168,7 +178,7 @@ object UserSiteParser {
         return User.UnverifiedUser(usernameText, avatarUrl.toString())
     }
 
-    fun parseJoinedDate(text: String): LocalDate {
+    private fun parseJoinedDate(text: String): LocalDate {
         val datePart = text
             .removePrefix("Joined ")
             .replace(Regex("(st|nd|rd|th)"), "")
@@ -184,6 +194,34 @@ object UserSiteParser {
             javaDate.year,
             javaDate.monthValue,
             javaDate.dayOfMonth
+        )
+    }
+
+    fun parsePagedUser(html: Document, url: Url, original: User.ScrapedUser, page: Int): User.PagedUser? {
+        val main = html.selectFirst(".app-layout")
+
+        if (main == null) {
+            logger.error("Failed to find main element in $url")
+            return null
+        }
+
+        val tabContent = main.selectFirst(".profile-tab-content")
+        if (tabContent == null) {
+            logger.warn("Failed to find posts section in $url")
+            return null
+        }
+        val posts = (tabContent.selectFirst(".profile-feed-page") ?: tabContent)
+            .select("> article")
+            .mapNotNull { PostParser.parse(it, url) }
+
+        // this is more a suspicion, because i couldn't find a user with more than 2 pages
+        val hasMorePages = main.getElementById("profile_feed_page_${page + 1}") != null
+
+        return User.PagedUser(
+            original = original,
+            page = page,
+            posts = posts,
+            hasMorePages = hasMorePages
         )
     }
 }

@@ -7,7 +7,7 @@ object UserTable : Table("users") {
     val name = varchar("name", 50) // the maximum length is 30 in app/models/user.rb, but legacy names could have been longer, so we use maximum length of 50 here
     val avatarUrl = varchar("avatar_url", 255)
 
-    val verified = bool("verified")
+    val verified = bool("verified").nullable()
 
     val bio = varchar("bio", 1_000).nullable()
     val slackId = varchar("slack_id", 15).nullable()
@@ -18,6 +18,7 @@ object UserTable : Table("users") {
     val achievementsCount = integer("achievements_count").nullable()
     val followerCount = integer("follower_count").nullable()
     val followingCount = integer("following_count").nullable()
+    val pages = integer("pages").nullable()
 
     val firstSeen = timestamp("first_seen")
     val lastRequested = timestamp("last_requested").nullable()

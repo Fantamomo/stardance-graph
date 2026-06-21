@@ -25,6 +25,8 @@ object RequestIterationsTable : Table("request_iterations") {
     // time spent requesting
     val requestingTime = duration("requesting_time").nullable()
 
+    val databaseRequests = integer("database_requests").nullable()
+
 
     // REQUEST COUNTS
     // how many requests we made in this iteration

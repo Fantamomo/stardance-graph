@@ -2,6 +2,7 @@ package com.fantamomo.hc.stardancegraph.scrapen.site
 
 import com.fantamomo.hc.stardancegraph.model.*
 import com.fantamomo.hc.stardancegraph.util.Logger
+import com.fantamomo.hc.stardancegraph.util.toMarkdown
 import io.ktor.http.*
 import org.jsoup.nodes.Element
 import kotlin.time.Instant
@@ -34,7 +35,7 @@ object PostParser {
             logger.warn("Failed to find author element in ${html.cssSelector()} from $url")
             return null
         }
-        val author = authorElement.text()
+        val author = authorElement.text().removePrefix("@")
         if (author.isBlank()) {
             logger.warn("Failed to find author in ${html.cssSelector()} from $url")
             return null
@@ -64,7 +65,9 @@ object PostParser {
     }
 
     private fun parseRepost(html: Element, url: Url, projectId: Int?, internalId: Int, author: String, quoted: Boolean): Repost? {
-        val repostedByElement = html.selectFirst(".feed-post-card__reposted-by-link")
+        val devlogContentElement = html.selectFirst(".feed-post-card__repost-preview")?.selectFirst("> article") ?: html
+
+        val repostedByElement = html.selectFirst(".feed-post-card__reposted-by-link") ?: if (quoted) html.selectFirst(".feed-post-card__author") else null
         if (repostedByElement == null) {
             logger.warn("Failed to find reposted by element in ${html.cssSelector()} from $url")
             return null
@@ -74,7 +77,7 @@ object PostParser {
             logger.warn("Failed to find reposted by in ${html.cssSelector()} from $url")
             return null
         }
-        val projectId = projectId ?: html.attr("data-feed-engagement-project-id-value").toIntOrNull()
+        val projectId = projectId ?: devlogContentElement.attr("data-feed-engagement-project-id-value").toIntOrNull()
         if (projectId == null) {
             logger.warn("Failed to find project ID in ${html.cssSelector()} from $url")
             return null
@@ -96,8 +99,6 @@ object PostParser {
             logger.warn("Failed to parse created at '$createdAtText' in ${html.cssSelector()} from $url", e)
             return null
         }
-
-        val devlogContentElement = html.selectFirst(".feed-post-card__repost-preview") ?: html
 
         val originalAuthorElement = devlogContentElement.selectFirst(".feed-post-card__author")
         if (originalAuthorElement == null) {
@@ -148,7 +149,7 @@ object PostParser {
                 logger.warn("Failed to find post body in ${html.cssSelector()} from $url, but was quoted")
                 null
             } else {
-                val message = postBody.text()
+                val message = postBody.toMarkdown()
                 message.ifBlank {
                     logger.warn("Failed to find post body in ${html.cssSelector()} from $url, but was quoted")
                     null
@@ -187,10 +188,10 @@ object PostParser {
             logger.warn("Failed to find ship number element in ${html.cssSelector()} from $url")
             return null
         }
-        val shipNumber = shipNumberElement.text().removePrefix("Ship #").takeWhile { it.isDigit() }.toIntOrNull()
-        if (shipNumber == null) {
+        val text = shipNumberElement.text()
+        val shipNumber = text.removePrefix("Ship #").takeWhile { it.isDigit() }.toIntOrNull()
+        if (shipNumber == null && text != "Ship") {
             logger.warn("Failed to find ship number in ${shipNumberElement.cssSelector()} from $url")
-            return null
         }
 
         val avatarUrlElement = html.selectFirst(".feed-post-card__avatar")
@@ -227,15 +228,15 @@ object PostParser {
             logger.warn("Failed to find body element in ${html.cssSelector()} from $url")
             return null
         }
-        val body = bodyElement.text()
+        val body = bodyElement.toMarkdown()
 
         val statsElement = html.selectFirst(".project-show__latest-ship-stats")
         if (statsElement == null) {
             logger.warn("Failed to find stats element in ${html.cssSelector()} from $url")
             return null
         }
-        val stats = statsElement.select("profile-project-card__meta-item").associateWith { it.text() }
-        if (stats.size != 2) {
+        val stats = statsElement.select(".profile-project-card__meta-item").associateWith { it.text() }
+        if (stats.size !in 2..3) {
             logger.warn("Expected 2 stats in ${statsElement.cssSelector()} from $url, but found ${stats.size} instead")
             return null
         }
@@ -243,6 +244,7 @@ object PostParser {
         if (devlogCount == null) logger.warn("Failed to find devlog count in ${statsElement.cssSelector()} from $url")
         val hourCount = stats.entries.firstOrNull { it.key.hasClass("profile-project-card__meta-item--time") }?.value?.takeWhile { it.isDigit() }?.toIntOrNull()
         if (hourCount == null) logger.warn("Failed to find hour count in ${statsElement.cssSelector()} from $url")
+        val mission = stats.entries.firstOrNull { it.key.hasClass("profile-project-card__meta-item--mission") }?.value
 
         val linkElement = html.selectFirst(".project-show__latest-ship-cta")
         if (linkElement == null) {
@@ -286,7 +288,8 @@ object PostParser {
             demoUrl = demoUrl,
             repoUrl = repoUrl,
             devlogCount = devlogCount ?: 0,
-            hourCount = hourCount ?: 0
+            hourCount = hourCount ?: 0,
+            mission = mission
         )
     }
 

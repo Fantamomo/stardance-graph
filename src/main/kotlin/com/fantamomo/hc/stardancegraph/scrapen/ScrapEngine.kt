@@ -4,9 +4,13 @@ import com.fantamomo.hc.stardancegraph.model.Scrapable
 import com.fantamomo.hc.stardancegraph.model.Sendable
 import com.fantamomo.hc.stardancegraph.scrapen.data.SiteStats
 import io.ktor.http.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
+import org.slf4j.LoggerFactory
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.decrementAndFetch
+import kotlin.concurrent.atomics.incrementAndFetch
+import kotlin.time.measureTime
 
 class ScrapEngine {
     // elements that are sent to the database so that they can be written to the database
@@ -29,6 +33,11 @@ class ScrapEngine {
 
     val siteStats = SiteStats()
 
+    // changing this value from the outside will completely break this code
+    internal val currentWork = AtomicInt(0)
+
+    private val stopping: CompletableDeferred<Unit> = CompletableDeferred()
+
     suspend fun run() = coroutineScope {
         launch {
             // starting the database writer
@@ -47,7 +56,23 @@ class ScrapEngine {
         databaseWriter.waitForReady()
 
         // starting the monster
-        toScrapeChannel.send(Scrapable.Project(3))
+        currentWork.incrementAndFetch()
+        toScrapeChannel.send(Scrapable.User("Fantamomo"))
+
+        waitForStop()
+    }
+
+    private suspend fun CoroutineScope.waitForStop() {
+        stopping.await()
+        var dispatched = true
+        val job = launch(Dispatchers.Unconfined) {
+            databaseWriter.waitForFinished()
+            dispatched = false
+        }
+        if (dispatched) logger.info("Waiting for databaseWriter to finish")
+        val waitingDuration = measureTime { job.join() }
+        if (dispatched) logger.info("DatabaseWriter finished in $waitingDuration")
+        logger.info("Finished")
     }
 
     private suspend fun progress() {
@@ -59,10 +84,35 @@ class ScrapEngine {
                 for (link in scrapable) {
                     if (scrapedLinks.add(link.url)) {
                         sendToToScrape++
-                        toScrapeChannel.send(link)
+                        if (sendToToScrape <= LIMIT_SCRAPES) {
+                            currentWork.incrementAndFetch()
+                            toScrapeChannel.send(link)
+                        }
                     }
                 }
             }
+            if (currentWork.decrementAndFetch() == 0) {
+                logger.info("No more work, stopping")
+                try {
+                    foundChannel.close()
+                } catch (e: Exception) {
+                    logger.error("Error closing foundChannel", e)
+                }
+                try {
+                    toScrapeChannel.close()
+                } catch (e: Exception) {
+                    logger.error("Error closing toScrapeChannel", e)
+                }
+                databaseWriter.stopSignal()
+                stopping.complete(Unit)
+            }
         }
+    }
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(ScrapEngine::class.java)
+
+        // testing only: limits the scrap-engine to 100 scrapes (excluding the initial scrape)
+        private const val LIMIT_SCRAPES = 100
     }
 }

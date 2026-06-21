@@ -8,12 +8,13 @@ data class ShipEvent(
     override val author: User,
     override val createdAt: Instant,
     val internalId: Int,
-    val shipNumber: Int,
+    val shipNumber: Int?,
     val body: String,
     val demoUrl: Url,
     val repoUrl: Url,
     val devlogCount: Int,
     val hourCount: Int,
+    val mission: String?,
 ) : Post {
     override fun getScrapable() = getScrapableInternal()
 }

@@ -3,15 +3,18 @@ package com.fantamomo.hc.stardancegraph.scrapen
 import com.fantamomo.hc.stardancegraph.data.SharedValues
 import com.fantamomo.hc.stardancegraph.model.Scrapable
 import com.fantamomo.hc.stardancegraph.model.Sendable
-import com.fantamomo.hc.stardancegraph.util.Logger
-import com.fantamomo.hc.stardancegraph.util.statistics.delay.waitingDelay
+import com.fantamomo.hc.stardancegraph.scrapen.site.DevlogParser
+import com.fantamomo.hc.stardancegraph.scrapen.site.FollowParser
+import com.fantamomo.hc.stardancegraph.scrapen.site.ProjectParser
+import com.fantamomo.hc.stardancegraph.scrapen.site.UserSiteParser
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
-import kotlin.time.Duration.Companion.seconds
+import org.slf4j.LoggerFactory
+import kotlin.concurrent.atomics.decrementAndFetch
 
 class SiteScraper(
     val engine: ScrapEngine,
@@ -20,43 +23,71 @@ class SiteScraper(
 ) {
     suspend fun start() {
         for (element in toScrap) {
-            waitingDelay(1.seconds)
+//            waitingDelay(1.seconds)
             logger.info("Scraping ${element.url}")
-            val response = try {
-                SharedValues.client.get(element.url)
-            } catch (e: Exception) {
-                logger.error("Failed to scrape ${element.url}", e)
-                continue
+            scrape(element)
+        }
+    }
+
+    private suspend fun scrape(element: Scrapable) {
+        val response = try {
+            SharedValues.client.get(element.url)
+        } catch (e: Exception) {
+            logger.error("Failed to scrape ${element.url}", e)
+            engine.currentWork.decrementAndFetch() // we failed to scrape, so we need to decrement the work counter
+            return
+        }
+        val body = try {
+            response.bodyAsText()
+        } catch (e: Exception) {
+            logger.error("Failed to read response body from ${element.url}", e)
+            engine.currentWork.decrementAndFetch()
+            return
+        }
+        val html = try {
+            Jsoup.parse(body)
+        } catch (e: Exception) {
+            logger.error("Failed to parse HTML from ${element.url}", e)
+            return
+        }
+        extractDevFooter(html)
+        val result: Sendable? = try {
+            when (element) {
+                is Scrapable.Devlog -> DevlogParser.parse(html, element.url)
+                is Scrapable.Project -> ProjectParser.parse(html, element.url, element.id)
+                is Scrapable.ProjectFollowers -> FollowParser.parseProjectFollowers(
+                    html,
+                    element.url,
+                    element.id,
+                    element.owner
+                )
+
+                is Scrapable.User -> UserSiteParser.parse(html, element.url)
+                is Scrapable.PagedUser -> UserSiteParser.parsePagedUser(html, element.url, element.original, element.page)
+                is Scrapable.UserFollowers -> FollowParser.parseUserFollowers(html, element.url, element.user)
+                is Scrapable.UserFollowing -> FollowParser.parseUserFollowing(html, element.url, element.user)
             }
-            val body = try {
-                response.bodyAsText()
-            } catch (e: Exception) {
-                logger.error("Failed to read response body from ${element.url}", e)
-                continue
-            }
-            val html = try {
-                Jsoup.parse(body)
-            } catch (e: Exception) {
-                logger.error("Failed to parse HTML from ${element.url}", e)
-                continue
-            }
-            extractDevFooter(html)
-            try {
-                when (element) {
-                    is Scrapable.Devlog -> TODO()
-                    is Scrapable.Project -> TODO()
-                    is Scrapable.ProjectFollowers -> TODO()
-                    is Scrapable.User -> TODO()
-                    is Scrapable.UserFollowers -> TODO()
-                    is Scrapable.UserFollowing -> TODO()
-                }
-            } catch (e: Exception) {
-                logger.error("Failed to analyze ${element.url}", e)
-            }
+        } catch (e: Exception) {
+            logger.error("Failed to analyze ${element.url}", e)
+            engine.currentWork.decrementAndFetch()
+            return
+        }
+        if (result != null) {
+            scraped.send(result)
+            logger.info("Successfully scraped ${element.url}, result: ${result::class.java.name}")
+        } else {
+            logger.warn("Failed to analyze ${element.url}")
+            engine.currentWork.decrementAndFetch()
         }
     }
 
     private fun extractDevFooter(html: Document) {
+        // followers/following requests don't have a footer, so we just ignore them
+        if (html.selectFirst("body")?.selectFirst("> .follow-list") != null) return
+        if (html.selectFirst("body")
+                ?.selectFirst("follow-list__empty") != null
+        ) return // also this should never happen, but just in case
+
         try {
             val footer = html.selectFirst(".dev-footer")
             val text = footer?.text()
@@ -81,10 +112,10 @@ class SiteScraper(
     }
 
     companion object {
-        private val logger = Logger()
+        private val logger = LoggerFactory.getLogger(SiteScraper::class.java)
 
         private val devFooterRegex = Regex(
-            """Build .*? from (?:about )?(\d+) ([a-z]+) ago\. \(DB: (\d+) queries?, (\d+) cached\) \(CACHE: (\d+) hits?, (\d+) misses?\) \(([\d.]+) req/sec\) \(Active: (\d+) signed in, (\d+) visitors\)"""
+            """Build .*? from (?:about )?(\d+) ([a-z]+) ago\. \(DB: (\d+) quer(?:y|ies)?, (\d+) cached\) \(CACHE: (\d+) hits?, (\d+) misses?\) \(([\d.]+) req/sec\) \(Active: (\d+) signed in, (\d+) visitors\)"""
         )
     }
 }

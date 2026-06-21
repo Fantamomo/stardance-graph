@@ -11,7 +11,8 @@ object DevlogTable : Table("devlogs") {
     // the internal id in the stardance database
     val internalId = integer("internal_id")
 
-    val content = varchar("content", 4_000)
+    // the maximum length of a devlog is 4000, but our html to markdown converter does not make the devlog like it was written by the user, so it is sometimes longer then 4000
+    val content = varchar("content", 4_500)
     val author = reference("author", UserTable.name)
     val project = reference("project", ProjectTable.id)
 

@@ -14,7 +14,6 @@ val NetworkStatsPlugin = createClientPlugin(
 ) {
     on(SendingRequest) { request, content ->
         currentCoroutineContext()[NetworkStats]?.let { stats ->
-            logger.debug("Sending request ${request.url} with body type ${request.bodyType} and (${content::class.java.name}) ")
             val contentLength = content.contentLength
             if (contentLength != null) {
                 stats.addSendBytes(contentLength)

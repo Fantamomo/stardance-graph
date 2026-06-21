@@ -1,0 +1,1 @@
+ALTER TABLE ship_events ADD attached_mission VARCHAR(30) NULL;

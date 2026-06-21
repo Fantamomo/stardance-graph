@@ -1,0 +1,1 @@
+ALTER TABLE devlogs ALTER COLUMN "content" TYPE VARCHAR(4500);

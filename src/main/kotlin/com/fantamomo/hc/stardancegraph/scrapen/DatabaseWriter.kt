@@ -3,25 +3,34 @@ package com.fantamomo.hc.stardancegraph.scrapen
 import com.fantamomo.hc.stardancegraph.db.*
 import com.fantamomo.hc.stardancegraph.manager.DatabaseManager
 import com.fantamomo.hc.stardancegraph.model.*
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.isActive
 import org.jetbrains.exposed.v1.r2dbc.batchUpsert
 import org.jetbrains.exposed.v1.r2dbc.select
 import org.jetbrains.exposed.v1.r2dbc.upsert
+import org.slf4j.LoggerFactory
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.incrementAndFetch
 import kotlin.time.Clock
 
 class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendable>) {
     // 0 = found, 1 = unverified, 2 = scraped
     private val existingUsers: MutableMap<String, Byte> = mutableMapOf()
+
     // false = found, true = scraped
     private val existingProjects: MutableMap<Int, Boolean> = mutableMapOf()
 
     private val ready = CompletableDeferred<Unit>()
+    private val finished = CompletableDeferred<Unit>()
+
+    private val databaseRequestsInternal = AtomicInt(0)
+    private val shouldStop = AtomicBoolean(false)
+
+    val databaseRequests: Int
+        get() = databaseRequestsInternal.load()
 
     @OptIn(DelicateCoroutinesApi::class)
     suspend fun start() = coroutineScope {
@@ -31,8 +40,14 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
                 .map { it[UserTable.name] }
                 .toList()
         }.forEach { existingUsers[it] = 0 }
+        databaseRequestsInternal.incrementAndFetch()
 
         ready.complete(Unit)
+
+        if (shouldStop.load()) {
+            finished.complete(Unit)
+            return@coroutineScope
+        }
 
         while (isActive && !channel.isClosedForReceive) {
             val elements = mutableListOf<Sendable>()
@@ -45,30 +60,59 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             if (elements.isNotEmpty()) {
                 saveToDatabase(elements)
             }
+            @OptIn(ExperimentalCoroutinesApi::class)
+            if (shouldStop.load()) {
+                if (channel.isEmpty) {
+                    finished.complete(Unit)
+                    return@coroutineScope
+                }
+                // the channel is not empty, so we need to wait for it to become empty
+            }
         }
     }
 
     suspend fun waitForReady() = ready.await()
 
+    suspend fun waitForFinished() = finished.await()
+
+    suspend fun stopSignal() {
+        shouldStop.store(true)
+    }
+
     private suspend fun saveToDatabase(elements: List<Sendable>) {
-        DatabaseManager.transaction {
-            elements.forEach { element ->
-                insert(element)
+        try {
+            DatabaseManager.transaction {
+                databaseRequestsInternal.incrementAndFetch()
+                elements.forEach { element ->
+                    try {
+                        insert(element)
+                    } catch (e: Exception) {
+                        logger.error("Error saving ${element::class.java.name} to database", e)
+                    }
+                }
             }
+        } catch (e: Exception) {
+            logger.error("Error saving to database", e)
         }
     }
 
     private suspend fun insert(element: Sendable) {
         when (element) {
-            is Devlog -> insertDevlog(element)
-            is Repost -> insertRepost(element)
-            is ShipEvent -> insertShipEvent(element)
-            is SuperStar -> insertSuperStar(element)
+            is Post -> insertPost(element)
             is User -> insertUser(element)
             is Project -> insertProject(element)
             is ProjectFollowers -> insertProjectFollowers(element)
             is UserFollower -> insertUserFollowers(element)
             is UserFollowing -> insertUserFollowing(element)
+        }
+    }
+
+    private suspend fun insertPost(element: Post) {
+        when (element) {
+            is Devlog -> insertDevlog(element)
+            is Repost -> insertRepost(element)
+            is ShipEvent -> insertShipEvent(element)
+            is SuperStar -> insertSuperStar(element)
         }
     }
 
@@ -186,9 +230,10 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         if (existingType == (-1).toByte()) {
             insertUser(element)
         } else {
-            val foundType = when (element) {
+            val foundType =  when (element) {
                 is User.FoundUser -> 0
                 is User.UnverifiedUser -> 1
+                is User.PagedUser -> throw IllegalStateException("PagedUser should not be inserted")
             }
             if (existingType < foundType) {
                 insertUser(element)
@@ -202,23 +247,45 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             is User.ScrapedUser -> insertScrapedUser(element)
             is User.FoundUser -> insertFoundUser(element)
             is User.UnverifiedUser -> insertUnverifiedUser(element)
+            is User.PagedUser -> insertPagedUser(element)
+        }
+    }
+
+    private suspend fun insertPagedUser(element: User.PagedUser) {
+        UserTable.upsert {
+            it[UserTable.name] = element.name
+            it[UserTable.avatarUrl] = element.avatarUrl
+
+            it[UserTable.pages] = element.page
+        }
+
+        for (post in element.posts) {
+            insertPost(post)
         }
     }
 
     private suspend fun insertUnverifiedUser(element: User.UnverifiedUser) {
-        UserTable.upsert {
+        UserTable.upsert(
+            onUpdateExclude = listOf(UserTable.firstSeen)
+        ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
             it[UserTable.verified] = false
+
+            it[UserTable.firstSeen] = Clock.System.now()
         }
         val existingType = existingUsers[element.name] ?: (-1).toByte()
         if (existingType < 1) existingUsers[element.name] = 1
     }
 
     private suspend fun insertFoundUser(element: User.FoundUser) {
-        UserTable.upsert {
+        UserTable.upsert(
+            onUpdateExclude = listOf(UserTable.firstSeen)
+        ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
+
+            it[UserTable.firstSeen] = Clock.System.now()
         }
         existingUsers.putIfAbsent(element.name, 0)
     }
@@ -240,6 +307,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[UserTable.achievementsCount] = element.achievements.size
             it[UserTable.followerCount] = element.followerCount
             it[UserTable.followingCount] = element.followingCount
+            it[UserTable.pages] = 1
 
             it[UserTable.firstSeen] = now
             it[UserTable.lastRequested] = now
@@ -256,6 +324,9 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             this[AchievementTable.firstSeen] = now
             this[AchievementTable.lastSeen] = now
             this[AchievementTable.lastSeenIteration] = Scraper.iterationId
+        }
+        for (post in element.posts) {
+            insertPost(post)
         }
     }
 
@@ -298,12 +369,15 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         ) {
             it[ShipEventTable.internalId] = element.internalId
             it[ShipEventTable.project] = element.projectId
-            it[ShipEventTable.shipNumber] = element.shipNumber
+            if (element.shipNumber != null) {
+                it[ShipEventTable.shipNumber] = element.shipNumber
+            }
             it[ShipEventTable.createdAt] = element.createdAt
             it[ShipEventTable.demoUrl] = element.demoUrl.toString()
             it[ShipEventTable.repoUrl] = element.repoUrl.toString()
             it[ShipEventTable.devlogCount] = element.devlogCount
             it[ShipEventTable.hourCount] = element.hourCount
+            it[ShipEventTable.attachedMission] = element.mission
             it[ShipEventTable.description] = element.body
 
             it[ShipEventTable.firstSeen] = now
@@ -389,5 +463,9 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
                 this[CommentsTable.lastSeenIteration] = Scraper.iterationId
             }
         }
+    }
+
+    companion object {
+        private val logger = LoggerFactory.getLogger(DatabaseWriter::class.java)
     }
 }

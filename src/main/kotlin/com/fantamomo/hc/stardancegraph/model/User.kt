@@ -9,12 +9,39 @@ sealed interface User : Sendable {
     data class UnverifiedUser(
         override val name: String,
         override val avatarUrl: String
-    ) : User
+    ) : User {
+        init {
+            if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
+        }
+    }
 
     data class FoundUser(
         override val name: String,
         override val avatarUrl: String
-    ) : User
+    ) : User {
+        init {
+            if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
+        }
+    }
+
+    data class PagedUser(
+        val original: ScrapedUser,
+        val page: Int,
+        val posts: List<Post>,
+        val hasMorePages: Boolean,
+    ) : User by original {
+        override fun getScrapable(): Set<Scrapable> {
+            val result = mutableSetOf<Scrapable>()
+//            result.addAll(original.getScrapable())
+            when (posts.size) {
+                 0 -> {}
+                 1 -> result.addAll(posts[0].getScrapable())
+                else -> posts.flatMapTo(result) { it.getScrapable() }
+            }
+            if (hasMorePages) result.add(Scrapable.PagedUser(name, page + 1, original))
+            return result
+        }
+    }
 
     data class ScrapedUser(
         override val name: String,
@@ -27,8 +54,12 @@ sealed interface User : Sendable {
         val followerCount: Int,
         val followingCount: Int,
         val achievements: List<String>,
-        val posts: List<Post>
+        val posts: List<Post>,
+        val hasMorePages: Boolean,
     ) : User {
+        init {
+            if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
+        }
         override fun getScrapable(): Set<Scrapable> {
             val result = mutableSetOf<Scrapable>()
             when (posts.size) {
@@ -36,8 +67,9 @@ sealed interface User : Sendable {
                 1 -> result.addAll(posts[0].getScrapable())
                 else -> posts.flatMapTo(result) { it.getScrapable() }
             }
-            if (followerCount > 0) result.add(Scrapable.UserFollowers(name))
-            if (followingCount > 0) result.add(Scrapable.UserFollowing(name))
+            if (followerCount > 0) result.add(Scrapable.UserFollowers(name, this))
+            if (followingCount > 0) result.add(Scrapable.UserFollowing(name, this))
+            if (hasMorePages) result.add(Scrapable.PagedUser(name, 2, this))
             return result
         }
     }

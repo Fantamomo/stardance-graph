@@ -39,7 +39,7 @@
         </encoder>
     </appender>
 
-    <root level="DEBUG">
+    <root level="INFO">
         <appender-ref ref="ERROR_FILE"/>
         <appender-ref ref="STDOUT"/>
         <appender-ref ref="FILE"/>

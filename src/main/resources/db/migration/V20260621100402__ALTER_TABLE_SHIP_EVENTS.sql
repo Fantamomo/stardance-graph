@@ -1,0 +1,1 @@
+ALTER TABLE ship_events ALTER COLUMN ship_number DROP NOT NULL;

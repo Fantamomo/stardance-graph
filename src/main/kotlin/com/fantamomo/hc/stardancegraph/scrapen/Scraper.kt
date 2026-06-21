@@ -89,6 +89,8 @@ object Scraper {
                     it[RequestIterationsTable.databaseCached] = siteStats.dbCached.load()
                     it[RequestIterationsTable.cacheHits] = siteStats.cacheHits.load()
                     it[RequestIterationsTable.cacheMisses] = siteStats.cacheMisses.load()
+
+                    it[RequestIterationsTable.databaseRequests] = engine.databaseWriter.databaseRequests
                 }
 
                 it[RequestIterationsTable.totalBytesSent] = networkStats.totalSend

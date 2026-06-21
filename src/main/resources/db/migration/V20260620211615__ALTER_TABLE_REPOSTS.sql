@@ -1,0 +1,1 @@
+ALTER TABLE reposts DROP CONSTRAINT fk_reposts_devlog__id;

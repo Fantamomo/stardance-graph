@@ -1,0 +1,1 @@
+ALTER TABLE users ADD pages INT NULL;

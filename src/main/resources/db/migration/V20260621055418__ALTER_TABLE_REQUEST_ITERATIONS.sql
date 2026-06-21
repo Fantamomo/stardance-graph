@@ -1,0 +1,1 @@
+ALTER TABLE request_iterations ADD database_requests INT NULL;

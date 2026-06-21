@@ -31,7 +31,7 @@ sealed interface Project : Sendable {
                  1 -> result.addAll(posts[0].getScrapable())
                 else -> posts.flatMapTo(result) { it.getScrapable() }
             }
-            if (followerCount > 0) result.add(Scrapable.ProjectFollowers(id))
+            if (followerCount > 0) result.add(Scrapable.ProjectFollowers(id, owner))
             return result
         }
     }
