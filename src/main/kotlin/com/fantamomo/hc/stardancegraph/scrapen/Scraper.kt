@@ -53,7 +53,7 @@ object Scraper {
         val waitingDelay = WaitingDelay()
         val requestStatistics = RequestStatistics()
         val networkStats = NetworkStats()
-        try {
+        val result = try {
             withContext(
                 waitingDelay + RequestStatisticsContext(requestStatistics) + networkStats
             ) {
@@ -61,6 +61,7 @@ object Scraper {
             }
         } catch (e: Throwable) {
             logger.error("Error while scraping", e)
+            null
         }
 
         val engine = engine
@@ -79,6 +80,25 @@ object Scraper {
                 it[RequestIterationsTable.requestedProjects] = requestsPerType[RequestType.PROJECT.name]?.load() ?: 0
                 it[RequestIterationsTable.requestedProjectFollowers] = requestsPerType[RequestType.PROJECT_FOLLOWERS.name]?.load() ?: 0
                 it[RequestIterationsTable.requestedDevlogs] = requestsPerType[RequestType.DEVLOG.name]?.load() ?: 0
+
+                @Suppress("DuplicatedCode")
+                if (result != null) {
+                    it[RequestIterationsTable.totalFound] = result.totalFound
+                    it[RequestIterationsTable.foundUsers] = result.foundUsers
+                    it[RequestIterationsTable.foundUserFollowers] = result.foundUserFollowers
+                    it[RequestIterationsTable.foundUserFollowing] = result.foundUserFollowing
+                    it[RequestIterationsTable.foundProjects] = result.foundProjects
+                    it[RequestIterationsTable.foundProjectFollowers] = result.foundProjectFollowers
+                    it[RequestIterationsTable.foundDevlogs] = result.foundDevlogs
+
+                    it[RequestIterationsTable.totalUnique] = result.totalUnique
+                    it[RequestIterationsTable.uniqueUsers] = result.uniqueUsers
+                    it[RequestIterationsTable.uniqueUserFollowers] = result.uniqueUserFollowers
+                    it[RequestIterationsTable.uniqueUserFollowing] = result.uniqueUserFollowing
+                    it[RequestIterationsTable.uniqueProjects] = result.uniqueProjects
+                    it[RequestIterationsTable.uniqueProjectFollowers] = result.uniqueProjectFollowers
+                    it[RequestIterationsTable.uniqueDevlogs] = result.uniqueDevlogs
+                }
 
                 it[RequestIterationsTable.totalErrors] = requestStatistics.exceptionCount.load()
                 it[RequestIterationsTable.totalNonSuccessResponses] = requestStatistics.nonSuccessfulStatusCodeCount.load()
@@ -100,8 +120,10 @@ object Scraper {
         return requestStatistics
     }
 
-    private suspend fun run() {
+    private suspend fun run(): ScrapEngine.Result {
         engine = ScrapEngine()
-        engine!!.run()
+        val result = engine!!.run()
+
+        return result
     }
 }

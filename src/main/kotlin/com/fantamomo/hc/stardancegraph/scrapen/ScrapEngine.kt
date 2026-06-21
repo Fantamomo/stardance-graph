@@ -38,7 +38,23 @@ class ScrapEngine {
 
     private val stopping: CompletableDeferred<Unit> = CompletableDeferred()
 
-    suspend fun run() = coroutineScope {
+    private var totalFound = 0
+    private var foundUsers = 0
+    private var foundUserFollowers = 0
+    private var foundUserFollowing = 0
+    private var foundProjects = 0
+    private var foundProjectFollowers = 0
+    private var foundDevlogs = 0
+
+    private var totalUnique = 0
+    private var uniqueUsers = 0
+    private var uniqueUserFollowers = 0
+    private var uniqueUserFollowing = 0
+    private var uniqueProjects = 0
+    private var uniqueProjectFollowers = 0
+    private var uniqueDevlogs = 0
+
+    suspend fun run(): Result = coroutineScope {
         launch {
             // starting the database writer
             databaseWriter.start()
@@ -56,10 +72,29 @@ class ScrapEngine {
         databaseWriter.waitForReady()
 
         // starting the monster
-        currentWork.incrementAndFetch()
-        toScrapeChannel.send(Scrapable.User("Fantamomo"))
+        for (projectId in 1..100) {
+            currentWork.incrementAndFetch()
+            toScrapeChannel.send(Scrapable.Project(projectId))
+        }
 
         waitForStop()
+
+        return@coroutineScope Result(
+            totalFound = totalFound,
+            foundUsers = foundUsers,
+            foundUserFollowers = foundUserFollowers,
+            foundUserFollowing = foundUserFollowing,
+            foundProjects = foundProjects,
+            foundProjectFollowers = foundProjectFollowers,
+            foundDevlogs = foundDevlogs,
+            totalUnique = totalUnique,
+            uniqueUsers = uniqueUsers,
+            uniqueUserFollowers = uniqueUserFollowers,
+            uniqueUserFollowing = uniqueUserFollowing,
+            uniqueProjects = uniqueProjects,
+            uniqueProjectFollowers = uniqueProjectFollowers,
+            uniqueDevlogs = uniqueDevlogs
+        )
     }
 
     private suspend fun CoroutineScope.waitForStop() {
@@ -82,7 +117,9 @@ class ScrapEngine {
             val scrapable = element.getScrapable()
             if (scrapable.isNotEmpty()) {
                 for (link in scrapable) {
+                    updateStatsFound(link)
                     if (scrapedLinks.add(link.url)) {
+                        updateStatsUnique(link)
                         sendToToScrape++
                         if (sendToToScrape <= LIMIT_SCRAPES) {
                             currentWork.incrementAndFetch()
@@ -109,10 +146,53 @@ class ScrapEngine {
         }
     }
 
+    @Suppress("DuplicatedCode")
+    private fun updateStatsFound(scrapable: Scrapable) {
+        totalFound++
+        when (scrapable) {
+            is Scrapable.User, is Scrapable.PagedUser -> foundUsers++
+            is Scrapable.UserFollowers -> foundUserFollowers++
+            is Scrapable.UserFollowing -> foundUserFollowing++
+            is Scrapable.Project -> foundProjects++
+            is Scrapable.ProjectFollowers -> foundProjectFollowers++
+            is Scrapable.Devlog -> foundDevlogs++
+        }
+    }
+
+    @Suppress("DuplicatedCode")
+    private fun updateStatsUnique(scrapable: Scrapable) {
+        totalUnique++
+        when (scrapable) {
+            is Scrapable.User, is Scrapable.PagedUser -> uniqueUsers++
+            is Scrapable.UserFollowers -> uniqueUserFollowers++
+            is Scrapable.UserFollowing -> uniqueUserFollowing++
+            is Scrapable.Project -> uniqueProjects++
+            is Scrapable.ProjectFollowers -> uniqueProjectFollowers++
+            is Scrapable.Devlog -> uniqueDevlogs++
+        }
+    }
+
+    class Result(
+        val totalFound: Int,
+        val foundUsers: Int,
+        val foundUserFollowers: Int,
+        val foundUserFollowing: Int,
+        val foundProjects: Int,
+        val foundProjectFollowers: Int,
+        val foundDevlogs: Int,
+        val totalUnique: Int,
+        val uniqueUsers: Int,
+        val uniqueUserFollowers: Int,
+        val uniqueUserFollowing: Int,
+        val uniqueProjects: Int,
+        val uniqueProjectFollowers: Int,
+        val uniqueDevlogs: Int,
+    )
+
     companion object {
         private val logger = LoggerFactory.getLogger(ScrapEngine::class.java)
 
-        // testing only: limits the scrap-engine to 100 scrapes (excluding the initial scrape)
-        private const val LIMIT_SCRAPES = 100
+        // testing only: limits the scrap-engine to a specific number of scrapes
+        private const val LIMIT_SCRAPES = Int.MAX_VALUE / 2
     }
 }

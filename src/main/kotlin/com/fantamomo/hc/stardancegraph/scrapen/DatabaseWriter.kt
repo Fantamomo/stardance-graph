@@ -3,6 +3,7 @@ package com.fantamomo.hc.stardancegraph.scrapen
 import com.fantamomo.hc.stardancegraph.db.*
 import com.fantamomo.hc.stardancegraph.manager.DatabaseManager
 import com.fantamomo.hc.stardancegraph.model.*
+import com.fantamomo.hc.stardancegraph.util.cachedLinkToSlack
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.map
@@ -252,11 +253,15 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
     }
 
     private suspend fun insertPagedUser(element: User.PagedUser) {
-        UserTable.upsert {
+        UserTable.upsert(
+            onUpdateExclude = listOf(UserTable.firstSeen)
+        ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
 
             it[UserTable.pages] = element.page
+
+            it[UserTable.firstSeen] = Clock.System.now()
         }
 
         for (post in element.posts) {
@@ -272,6 +277,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[UserTable.avatarUrl] = element.avatarUrl
             it[UserTable.verified] = false
 
+            it[UserTable.slackId] = cachedLinkToSlack(element.avatarUrl)
+
             it[UserTable.firstSeen] = Clock.System.now()
         }
         val existingType = existingUsers[element.name] ?: (-1).toByte()
@@ -284,6 +291,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
+            it[UserTable.slackId] = cachedLinkToSlack(element.avatarUrl)
 
             it[UserTable.firstSeen] = Clock.System.now()
         }
@@ -300,6 +308,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[UserTable.verified] = true
 
             it[UserTable.bio] = element.bio
+            it[UserTable.slackId] = cachedLinkToSlack(element.avatarUrl)
             it[UserTable.devlogCount] = element.devlogCount
             it[UserTable.projectCount] = element.projectsCount
             it[UserTable.shipCount] = element.shipCount

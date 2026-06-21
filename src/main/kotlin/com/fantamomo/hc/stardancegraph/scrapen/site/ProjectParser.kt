@@ -36,7 +36,12 @@ object ProjectParser {
             logger.error("Failed to find author avatar element in $url")
             return null
         }
-        val authorAvatarUrlText = authorAvatarElement.attr("src")
+        val authorAvatarUrlText =
+            // didn't know this, but some users don't have avatars, which completely breaks my code,
+            // because I thought every user has an avatar, so instead of rewriting like everything,
+            // we just return a placeholder avatar URL
+            if (authorAvatarElement.hasClass("project-show__avatar--placeholder")) "https://stardance.hackclub.com/assets/avatars/guest_star_3-3ac50924.png"
+            else authorAvatarElement.attr("src")
         if (authorAvatarUrlText.isBlank()) {
             logger.error("Failed to find author avatar URL in $url")
             return null
@@ -106,11 +111,7 @@ object ProjectParser {
         val superstar = panel.selectFirst(".project-show__badge--fire") != null
 
         val postContainer = html.selectFirst(".project-show__feed")
-        if (postContainer == null) {
-            logger.error("Failed to find post container element in $url")
-            return null
-        }
-        val posts = postContainer.select("> article").mapNotNull { PostParser.parse(it, url) }
+        val posts = postContainer?.select("> article")?.mapNotNull { PostParser.parse(it, url) } ?: emptyList()
 
         return Project.ScrapedProject(
             id = projectId,

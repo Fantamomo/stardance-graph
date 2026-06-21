@@ -7,6 +7,7 @@ import com.fantamomo.hc.stardancegraph.scrapen.site.DevlogParser
 import com.fantamomo.hc.stardancegraph.scrapen.site.FollowParser
 import com.fantamomo.hc.stardancegraph.scrapen.site.ProjectParser
 import com.fantamomo.hc.stardancegraph.scrapen.site.UserSiteParser
+import com.fantamomo.hc.stardancegraph.util.statistics.delay.waitingDelay
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -15,6 +16,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.atomics.decrementAndFetch
+import kotlin.time.Duration.Companion.seconds
 
 class SiteScraper(
     val engine: ScrapEngine,
@@ -22,10 +24,18 @@ class SiteScraper(
     val toScrap: ReceiveChannel<Scrapable>
 ) {
     suspend fun start() {
+        var scraped = 0
         for (element in toScrap) {
-//            waitingDelay(1.seconds)
-            logger.info("Scraping ${element.url}")
+            scraped++
+            logger.info("[$scraped] Scraping ${element.url}")
             scrape(element)
+            if (scraped % 100 == 0) {
+                logger.info("Waiting for 30 seconds")
+                waitingDelay(30.seconds)
+            } else if (scraped % 50 == 0) {
+                logger.info("Waiting for 10 seconds")
+                waitingDelay(10.seconds)
+            }
         }
     }
 

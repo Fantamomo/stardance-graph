@@ -79,7 +79,9 @@ object PostParser {
         }
         val projectId = projectId ?: devlogContentElement.attr("data-feed-engagement-project-id-value").toIntOrNull()
         if (projectId == null) {
-            logger.warn("Failed to find project ID in ${html.cssSelector()} from $url")
+            if (html.attr("data-card-link-url-value").isNotEmpty()) { // the data-card-link-url-value does not exists for reposts from devlgos where the author hasn't verified there identity yet
+                logger.warn("Failed to find project ID in ${html.cssSelector()} from $url")
+            }
             return null
         }
 

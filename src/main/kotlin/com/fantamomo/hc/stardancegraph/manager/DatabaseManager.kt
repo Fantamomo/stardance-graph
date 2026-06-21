@@ -1,7 +1,7 @@
 package com.fantamomo.hc.stardancegraph.manager
 
 import com.fantamomo.hc.stardancegraph.data.Config
-import com.fantamomo.hc.stardancegraph.db.MigrationTable
+import com.fantamomo.hc.stardancegraph.db.*
 import com.fantamomo.hc.stardancegraph.util.Logger
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
@@ -11,6 +11,7 @@ import java.io.File
 import java.net.URLDecoder
 import java.util.jar.JarFile
 import kotlin.time.Clock
+import kotlin.time.Duration
 import kotlin.time.measureTime
 
 object DatabaseManager {
@@ -69,6 +70,34 @@ object DatabaseManager {
                 .select(MigrationTable.migration)
                 .map { it[MigrationTable.migration] }
                 .toList()
+        }
+
+        val firstRun = appliedMigrations.isEmpty()
+        if (firstRun) {
+            logger.info("First run, just initializing database, ignoring migrations")
+            transaction {
+                SchemaUtils.create(
+                    AchievementTable,
+                    CommentsTable,
+                    DevlogAttachmentsTable,
+                    DevlogTable,
+                    ProgramIterationsTable,
+                    ProjectFollowersTable,
+                    ProjectTable,
+                    RepostTable,
+                    RequestIterationsTable,
+                    ShipEventTable,
+                    SuperstarTable,
+                    UserFollowerTable,
+                    UserTable,
+                )
+                MigrationTable.batchInsert(migrationFiles) {
+                    this[MigrationTable.migration] = it
+                    this[MigrationTable.appliedAt] = Clock.System.now()
+                    this[MigrationTable.took] = Duration.ZERO
+                }
+            }
+            return
         }
 
         if (CREATE_TABLE_DB_MIGRATIONS_FILE_NAME !in appliedMigrations) {
