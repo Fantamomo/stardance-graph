@@ -10,6 +10,7 @@ import com.fantamomo.hc.stardancegraph.scrapen.site.UserSiteParser
 import com.fantamomo.hc.stardancegraph.util.statistics.delay.waitingDelay
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import io.ktor.http.*
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import org.jsoup.Jsoup
@@ -28,14 +29,16 @@ class SiteScraper(
         for (element in toScrap) {
             scraped++
             logger.info("[$scraped] Scraping ${element.url}")
+
             scrape(element)
+
             if (scraped % 100 == 0) {
-                logger.info("Waiting for 30 seconds")
-                waitingDelay(30.seconds)
-            } else if (scraped % 50 == 0) {
+                logger.info("Waiting for 5 seconds")
+                waitingDelay(5.seconds)
+            } /*else if (scraped % 50 == 0) {
                 logger.info("Waiting for 10 seconds")
                 waitingDelay(10.seconds)
-            }
+            }*/
         }
     }
 
@@ -45,6 +48,12 @@ class SiteScraper(
         } catch (e: Exception) {
             logger.error("Failed to scrape ${element.url}", e)
             engine.currentWork.decrementAndFetch() // we failed to scrape, so we need to decrement the work counter
+            return
+        }
+        if (element is Scrapable.Project && response.status == HttpStatusCode.NotFound) {
+            logger.warn("Project not found: ${element.url}")
+            engine.currentWork.decrementAndFetch()
+            engine.project404ErrorCount++
             return
         }
         val body = try {

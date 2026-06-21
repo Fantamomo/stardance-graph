@@ -231,7 +231,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         if (existingType == (-1).toByte()) {
             insertUser(element)
         } else {
-            val foundType =  when (element) {
+            val foundType = when (element) {
                 is User.FoundUser -> 0
                 is User.UnverifiedUser -> 1
                 is User.PagedUser -> throw IllegalStateException("PagedUser should not be inserted")
@@ -422,6 +422,10 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         insertMissingUser(element.author)
         if (element.projectId !in existingProjects) {
             insertProject(Project.FoundProject(element.projectId, element.author))
+        }
+        if (element.body.length > 4500) {
+            logger.warn("Devlog (id: ${element.id} from ${element.projectId}) too long: ${element.body.length} > 4500")
+            return
         }
         val now = Clock.System.now()
         DevlogTable.upsert(

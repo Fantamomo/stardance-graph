@@ -9,12 +9,13 @@
         <file>logs/application.log</file>
 
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>logs/archive/%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <fileNamePattern>logs/archive/%d{yyyy-MM-dd_HH-mm-ss}.%i.log.gz</fileNamePattern>
+
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
 
             <maxFileSize>50MB</maxFileSize>
             <maxHistory>30</maxHistory>
             <totalSizeCap>1GB</totalSizeCap>
-
         </rollingPolicy>
 
         <encoder>

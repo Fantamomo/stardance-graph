@@ -1,5 +1,6 @@
 package com.fantamomo.hc.stardancegraph.scrapen
 
+import com.fantamomo.hc.stardancegraph.model.Project
 import com.fantamomo.hc.stardancegraph.model.Scrapable
 import com.fantamomo.hc.stardancegraph.model.Sendable
 import com.fantamomo.hc.stardancegraph.scrapen.data.SiteStats
@@ -35,6 +36,13 @@ class ScrapEngine {
 
     // changing this value from the outside will completely break this code
     internal val currentWork = AtomicInt(0)
+
+    // we use these 3 values to fully scrap all projects until 20 consecutive projects fail to scrape with 404
+    internal var biggestProjectId = 0
+        private set
+    internal var biggestSuccessfullyScrapedProjectId = 0
+        private set
+    internal var project404ErrorCount = 0
 
     private val stopping: CompletableDeferred<Unit> = CompletableDeferred()
 
@@ -72,9 +80,10 @@ class ScrapEngine {
         databaseWriter.waitForReady()
 
         // starting the monster
-        for (projectId in 1..100) {
-            currentWork.incrementAndFetch()
-            toScrapeChannel.send(Scrapable.Project(projectId))
+        currentWork.incrementAndFetch()
+        biggestProjectId = 20000
+        for (i in 1..20000) {
+            toScrapeChannel.send(Scrapable.Project(i))
         }
 
         waitForStop()
@@ -112,36 +121,74 @@ class ScrapEngine {
 
     private suspend fun progress() {
         var sendToToScrape = 0
+        var sendLimitError = false
         for (element in foundChannel) {
             databaseChannel.send(element)
+
+            if (element is Project.ScrapedProject) {
+                biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, element.id)
+//                logger.info("biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId")
+                project404ErrorCount = 0
+            }
+
             val scrapable = element.getScrapable()
             if (scrapable.isNotEmpty()) {
                 for (link in scrapable) {
+                    if (link is Scrapable.Project) {
+                        biggestProjectId = maxOf(biggestProjectId, link.id)
+                    }
+
                     updateStatsFound(link)
+
                     if (scrapedLinks.add(link.url)) {
                         updateStatsUnique(link)
                         sendToToScrape++
                         if (sendToToScrape <= LIMIT_SCRAPES) {
                             currentWork.incrementAndFetch()
                             toScrapeChannel.send(link)
+                        } else if (!sendLimitError) {
+                            logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
+                            sendLimitError = true
                         }
                     }
                 }
             }
+
             if (currentWork.decrementAndFetch() == 0) {
-                logger.info("No more work, stopping")
-                try {
-                    foundChannel.close()
-                } catch (e: Exception) {
-                    logger.error("Error closing foundChannel", e)
+//                logger.info("currentWork = 0, biggestProjectId = $biggestProjectId, biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId, project404ErrorCount = $project404ErrorCount")
+                var success = false
+                if (project404ErrorCount <= 20) {
+                    for (i in 1..20) {
+                        val nextProjectId = maxOf(biggestProjectId, biggestSuccessfullyScrapedProjectId) + 1
+                        val project = Scrapable.Project(nextProjectId)
+                        biggestProjectId = nextProjectId
+                        if (scrapedLinks.add(project.url)) {
+                            currentWork.incrementAndFetch()
+                            toScrapeChannel.send(project)
+                            success = true
+                            break
+                        }
+                    }
+                    if (!success) {
+                        logger.warn("Could not find new project to scrape")
+                        project404ErrorCount = Int.MAX_VALUE
+                    }
                 }
-                try {
-                    toScrapeChannel.close()
-                } catch (e: Exception) {
-                    logger.error("Error closing toScrapeChannel", e)
+                if (project404ErrorCount > 20 && !success) {
+                    logger.info("No more work, stopping")
+                    try {
+                        foundChannel.close()
+                    } catch (e: Exception) {
+                        logger.error("Error closing foundChannel", e)
+                    }
+                    try {
+                        toScrapeChannel.close()
+                    } catch (e: Exception) {
+                        logger.error("Error closing toScrapeChannel", e)
+                    }
+                    databaseWriter.stopSignal()
+                    stopping.complete(Unit)
                 }
-                databaseWriter.stopSignal()
-                stopping.complete(Unit)
             }
         }
     }
