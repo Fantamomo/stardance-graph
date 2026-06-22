@@ -157,7 +157,7 @@ class ScrapEngine {
                 }
             }
 
-            if (currentWork.decrementAndFetch() == 0) {
+            if (currentWork.decrementAndFetch() <= 0) {
 //                logger.info("currentWork = 0, biggestProjectId = $biggestProjectId, biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId, project404ErrorCount = $project404ErrorCount")
                 var success = false
                 if (project404ErrorCount <= 100) {
@@ -177,7 +177,8 @@ class ScrapEngine {
                         project404ErrorCount = Int.MAX_VALUE
                     }
                 }
-                if (project404ErrorCount > 100 && !success) {
+                success
+                if (project404ErrorCount > 100) {
                     logger.info("No more work, stopping")
                     try {
                         foundChannel.close()
