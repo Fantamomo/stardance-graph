@@ -1,4 +1,4 @@
-package com.fantamomo.hc.stardancegraph.scrapen.site
+package com.fantamomo.hc.stardancegraph.scrapen.parser
 
 import com.fantamomo.hc.stardancegraph.model.Comment
 import com.fantamomo.hc.stardancegraph.model.Devlog

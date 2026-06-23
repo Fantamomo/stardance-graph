@@ -1,11 +1,12 @@
-package com.fantamomo.hc.stardancegraph.util.statistics.network
+package com.fantamomo.hc.stardancegraph.util
 
 import io.ktor.utils.io.*
 import kotlinx.io.Buffer
 import org.slf4j.LoggerFactory
 
 // copied and modified from io.ktor.utils.io.CountedByteReadChannel
-class CountedByteReadChannel(private val delegate: ByteReadChannel, private val onRead: (Long) -> Unit) : ByteReadChannel {
+class CountedByteReadChannel(private val delegate: ByteReadChannel, private val onRead: (Long) -> Unit) :
+    ByteReadChannel {
     private val buffer = Buffer()
     private var initial = 0L
     private var consumed = 0L

@@ -1,4 +1,4 @@
-package com.fantamomo.hc.stardancegraph.util.statistics.network
+package com.fantamomo.hc.stardancegraph.util.plugins.network
 
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.coroutines.AbstractCoroutineContextElement
