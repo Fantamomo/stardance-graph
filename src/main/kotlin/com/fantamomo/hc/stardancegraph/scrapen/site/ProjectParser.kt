@@ -31,6 +31,8 @@ object ProjectParser {
         }
         val title = titleElement.text()
 
+        val isHardware = panel.selectFirst(".project-show__tag--hardware") != null
+
         val authorAvatarElement = panel.selectFirst(".project-show__avatar")
         if (authorAvatarElement == null) {
             logger.error("Failed to find author avatar element in $url")
@@ -125,6 +127,7 @@ object ProjectParser {
             followerCount = followers ?: 0,
             devlogCount = devlogCount ?: 0,
             hourCount = hourCount ?: 0,
+            isHardware = isHardware,
             posts = posts
         )
     }

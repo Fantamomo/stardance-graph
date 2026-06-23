@@ -13,9 +13,11 @@ object ProjectTable : Table("projects") {
     val description = varchar("description", 1_000).nullable()
     val superstar = bool("superstar").nullable()
 
-    val followerCount = integer("followerCount").nullable()
-    val devlogCount = integer("devlogCount").nullable()
-    val totalHours = integer("totalHours").nullable()
+    val followerCount = integer("follower_count").nullable()
+    val devlogCount = integer("devlog_count").nullable()
+    val totalHours = integer("total_hours").nullable()
+    val postCount = integer("post_count").nullable()
+    val isHardware = bool("is_hardware").nullable()
 
     val firstSeen = timestamp("first_seen")
     val lastRequested = timestamp("last_requested").nullable()

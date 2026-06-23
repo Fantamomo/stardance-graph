@@ -212,6 +212,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[ProjectTable.followerCount] = element.followerCount
             it[ProjectTable.devlogCount] = element.devlogCount
             it[ProjectTable.totalHours] = element.hourCount
+            it[ProjectTable.postCount] = element.posts.size
+            it[ProjectTable.isHardware] = element.isHardware
 
             it[ProjectTable.firstSeen] = now
             it[ProjectTable.lastRequested] = now
