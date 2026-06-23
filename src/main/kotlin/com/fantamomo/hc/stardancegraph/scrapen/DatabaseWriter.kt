@@ -9,15 +9,15 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
 import org.jetbrains.exposed.v1.r2dbc.batchUpsert
+import org.jetbrains.exposed.v1.r2dbc.insertAndGetId
 import org.jetbrains.exposed.v1.r2dbc.select
 import org.jetbrains.exposed.v1.r2dbc.upsert
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.incrementAndFetch
-import kotlin.time.Clock
 
-class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendable>) {
+class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<ScrapedObject>) {
     // 0 = found, 1 = unverified, 2 = scraped
     private val existingUsers: MutableMap<String, Byte> = mutableMapOf()
 
@@ -51,7 +51,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         }
 
         while (isActive && !channel.isClosedForReceive) {
-            val elements = mutableListOf<Sendable>()
+            val elements = mutableListOf<ScrapedObject>()
             elements.add(channel.receive())
             while (isActive && !channel.isClosedForReceive) {
                 val element = channel.tryReceive()
@@ -80,7 +80,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         shouldStop.store(true)
     }
 
-    private suspend fun saveToDatabase(elements: List<Sendable>) {
+    private suspend fun saveToDatabase(elements: List<ScrapedObject>) {
         try {
             DatabaseManager.transaction {
                 databaseRequestsInternal.incrementAndFetch()
@@ -97,62 +97,93 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         }
     }
 
-    private suspend fun insert(element: Sendable) {
-        when (element) {
-            is Post -> insertPost(element)
-            is User -> insertUser(element)
-            is Project -> insertProject(element)
-            is ProjectFollowers -> insertProjectFollowers(element)
-            is UserFollower -> insertUserFollowers(element)
-            is UserFollowing -> insertUserFollowing(element)
+    private suspend fun insert(obj: ScrapedObject) {
+        val sendable = obj.sendable
+        val requestId = RequestTable.insertAndGetId {
+            it[RequestTable.url] = obj.url.toString()
+            it[RequestTable.method] = obj.method.value
+            it[RequestTable.type] = obj.type.name
+
+            it[RequestTable.requestedAt] = obj.requestedAt
+            it[RequestTable.duration] = obj.duration
+            it[RequestTable.statusCode] = obj.statusCode.toShort()
+            it[RequestTable.result] =
+                sendable?.let { sendable -> sendable::class.java.simpleName }
+
+            it[RequestTable.sendBytes] = obj.sendBytes
+            it[RequestTable.receiveBytes] = obj.receivedBytes
+
+            val footer = obj.devFooter
+            if (footer != null) {
+                it[RequestTable.serverBuild] = footer.build
+                it[RequestTable.serverBuildAgo] = footer.timeAgo
+                it[RequestTable.serverDbQueries] = footer.dbQueries
+                it[RequestTable.serverDbCached] = footer.dbQueriesCached
+                it[RequestTable.serverCacheHits] = footer.cacheHits
+                it[RequestTable.serverCacheMisses] = footer.cacheMisses
+                it[RequestTable.serverRequestPerSecond] = footer.requestPerSecond
+                it[RequestTable.serverActiveUsersSignIn] = footer.signedInUsers
+                it[RequestTable.serverActiveUsersVisitors] = footer.visitors
+            }
+
+            it[RequestTable.requestIteration] = Scraper.iterationId
+        }
+        if (sendable != null) {
+            insertSendable(sendable, requestId.value)
         }
     }
 
-    private suspend fun insertPost(element: Post) {
+    private suspend fun insertSendable(element: Sendable, requestId: Int) {
         when (element) {
-            is Devlog -> insertDevlog(element)
-            is Repost -> insertRepost(element)
-            is ShipEvent -> insertShipEvent(element)
-            is SuperStar -> insertSuperStar(element)
+            is Post -> insertPost(element, requestId)
+            is User -> insertUser(element, requestId)
+            is Project -> insertProject(element, requestId)
+            is ProjectFollowers -> insertProjectFollowers(element, requestId)
+            is UserFollower -> insertUserFollowers(element, requestId)
+            is UserFollowing -> insertUserFollowing(element, requestId)
         }
     }
 
-    private suspend fun insertUserFollowing(element: UserFollowing) {
-        insertMissingUser(element.user)
-        for (follower in element.following) insertMissingUser(follower)
-        val now = Clock.System.now()
+    private suspend fun insertPost(element: Post, requestId: Int) {
+        when (element) {
+            is Devlog -> insertDevlog(element, requestId)
+            is Repost -> insertRepost(element, requestId)
+            is ShipEvent -> insertShipEvent(element, requestId)
+            is SuperStar -> insertSuperStar(element, requestId)
+        }
+    }
+
+    private suspend fun insertUserFollowing(element: UserFollowing, requestId: Int) {
+        insertMissingUser(element.user, requestId)
+        for (follower in element.following) insertMissingUser(follower, requestId)
         UserFollowerTable.batchUpsert(
             element.following,
             onUpdateExclude = listOf(UserFollowerTable.firstSeen)
         ) {
             this[UserFollowerTable.follower] = element.user.name
             this[UserFollowerTable.user] = it.name
-            this[UserFollowerTable.firstSeen] = now
-            this[UserFollowerTable.lastSeen] = now
-            this[UserFollowerTable.lastSeenIteration] = Scraper.iterationId
+            this[UserFollowerTable.firstSeen] = requestId
+            this[UserFollowerTable.lastSeen] = requestId
         }
     }
 
-    private suspend fun insertUserFollowers(element: UserFollower) {
-        insertMissingUser(element.user)
-        for (follower in element.follower) insertMissingUser(follower)
-        val now = Clock.System.now()
+    private suspend fun insertUserFollowers(element: UserFollower, requestId: Int) {
+        insertMissingUser(element.user, requestId)
+        for (follower in element.follower) insertMissingUser(follower, requestId)
         UserFollowerTable.batchUpsert(
             element.follower,
             onUpdateExclude = listOf(UserFollowerTable.firstSeen)
         ) {
             this[UserFollowerTable.follower] = it.name
             this[UserFollowerTable.user] = element.user.name
-            this[UserFollowerTable.firstSeen] = now
-            this[UserFollowerTable.lastSeen] = now
-            this[UserFollowerTable.lastSeenIteration] = Scraper.iterationId
+            this[UserFollowerTable.firstSeen] = requestId
+            this[UserFollowerTable.lastSeen] = requestId
         }
     }
 
-    private suspend fun insertProjectFollowers(element: ProjectFollowers) {
-        insertMissingProject(element.project, element.owner)
-        for (follower in element.followers) insertMissingUser(follower)
-        val now = Clock.System.now()
+    private suspend fun insertProjectFollowers(element: ProjectFollowers, requestId: Int) {
+        insertMissingProject(element.project, element.owner, requestId)
+        for (follower in element.followers) insertMissingUser(follower, requestId)
         ProjectFollowersTable.batchUpsert(
             element.followers,
             onUpdateExclude = listOf(ProjectFollowersTable.firstSeen)
@@ -160,46 +191,42 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             this[ProjectFollowersTable.project] = element.project
             this[ProjectFollowersTable.follower] = it.name
 
-            this[ProjectFollowersTable.firstSeen] = now
-            this[ProjectFollowersTable.lastSeen] = now
-            this[ProjectFollowersTable.lastSeenIteration] = Scraper.iterationId
+            this[ProjectFollowersTable.firstSeen] = requestId
+            this[ProjectFollowersTable.lastSeen] = requestId
         }
     }
 
-    private suspend fun insertMissingProject(id: Int, owner: User) {
-        insertMissingUser(owner)
+    private suspend fun insertMissingProject(id: Int, owner: User, requestId: Int) {
+        insertMissingUser(owner, requestId)
         val existing = existingProjects[id]
         if (existing == null) {
-            insertFoundProject(Project.FoundProject(id, owner))
+            insertFoundProject(Project.FoundProject(id, owner), requestId)
         }
     }
 
-    private suspend fun insertProject(element: Project) {
+    private suspend fun insertProject(element: Project, requestId: Int) {
         when (element) {
-            is Project.FoundProject -> insertFoundProject(element)
-            is Project.ScrapedProject -> insertScrapedProject(element)
+            is Project.FoundProject -> insertFoundProject(element, requestId)
+            is Project.ScrapedProject -> insertScrapedProject(element, requestId)
         }
     }
 
-    private suspend fun insertFoundProject(element: Project.FoundProject) {
-        insertMissingUser(element.owner)
-        val now = Clock.System.now()
+    private suspend fun insertFoundProject(element: Project.FoundProject, requestId: Int) {
+        insertMissingUser(element.owner, requestId)
         ProjectTable.upsert(
             onUpdateExclude = listOf(ProjectTable.firstSeen)
         ) {
             it[ProjectTable.id] = element.id
             it[ProjectTable.owner] = element.owner.name
 
-            it[ProjectTable.firstSeen] = now
-            it[ProjectTable.lastRequested] = now
-            it[ProjectTable.lastRequestedIteration] = Scraper.iterationId
+            it[ProjectTable.firstSeen] = requestId
+            it[ProjectTable.lastRequested] = requestId
         }
         existingProjects.putIfAbsent(element.id, false)
     }
 
-    private suspend fun insertScrapedProject(element: Project.ScrapedProject) {
-        if (element.owner.name !in existingUsers) insertUser(element.owner)
-        val now = Clock.System.now()
+    private suspend fun insertScrapedProject(element: Project.ScrapedProject, requestId: Int) {
+        if (element.owner.name !in existingUsers) insertUser(element.owner, requestId)
         ProjectTable.upsert(
             onUpdateExclude = listOf(ProjectTable.firstSeen)
         ) {
@@ -215,23 +242,25 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[ProjectTable.postCount] = element.posts.size
             it[ProjectTable.isHardware] = element.isHardware
 
-            it[ProjectTable.firstSeen] = now
-            it[ProjectTable.lastRequested] = now
-            it[ProjectTable.lastRequestedIteration] = Scraper.iterationId
+            it[ProjectTable.firstSeen] = requestId
+            it[ProjectTable.lastRequested] = requestId
         }
         val existing = existingProjects[element.id] ?: false
         if (!existing) existingProjects[element.id] = true
+        for (post in element.posts) {
+            insertPost(post, requestId)
+        }
     }
 
-    private suspend fun insertMissingUser(element: User) {
+    private suspend fun insertMissingUser(element: User, requestId: Int) {
         if (element is User.ScrapedUser) {
-            insertScrapedUser(element)
+            insertScrapedUser(element, requestId)
             return
         }
 
         val existingType = existingUsers[element.name] ?: (-1).toByte()
         if (existingType == (-1).toByte()) {
-            insertUser(element)
+            insertUser(element, requestId)
         } else {
             val foundType = when (element) {
                 is User.FoundUser -> 0
@@ -239,22 +268,22 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
                 is User.PagedUser -> throw IllegalStateException("PagedUser should not be inserted")
             }
             if (existingType < foundType) {
-                insertUser(element)
+                insertUser(element, requestId)
                 return
             }
         }
     }
 
-    private suspend fun insertUser(element: User) {
+    private suspend fun insertUser(element: User, requestId: Int) {
         when (element) {
-            is User.ScrapedUser -> insertScrapedUser(element)
-            is User.FoundUser -> insertFoundUser(element)
-            is User.UnverifiedUser -> insertUnverifiedUser(element)
-            is User.PagedUser -> insertPagedUser(element)
+            is User.ScrapedUser -> insertScrapedUser(element, requestId)
+            is User.FoundUser -> insertFoundUser(element, requestId)
+            is User.UnverifiedUser -> insertUnverifiedUser(element, requestId)
+            is User.PagedUser -> insertPagedUser(element, requestId)
         }
     }
 
-    private suspend fun insertPagedUser(element: User.PagedUser) {
+    private suspend fun insertPagedUser(element: User.PagedUser, requestId: Int) {
         UserTable.upsert(
             onUpdateExclude = listOf(UserTable.firstSeen)
         ) {
@@ -263,15 +292,16 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
 
             it[UserTable.pages] = element.page
 
-            it[UserTable.firstSeen] = Clock.System.now()
+            it[UserTable.firstSeen] = requestId
+            it[UserTable.lastRequested] = requestId
         }
 
         for (post in element.posts) {
-            insertPost(post)
+            insertPost(post, requestId)
         }
     }
 
-    private suspend fun insertUnverifiedUser(element: User.UnverifiedUser) {
+    private suspend fun insertUnverifiedUser(element: User.UnverifiedUser, requestId: Int) {
         UserTable.upsert(
             onUpdateExclude = listOf(UserTable.firstSeen)
         ) {
@@ -281,27 +311,28 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
 
             it[UserTable.slackId] = cachedLinkToSlack(element.avatarUrl)
 
-            it[UserTable.firstSeen] = Clock.System.now()
+            it[UserTable.firstSeen] = requestId
+            it[UserTable.lastRequested] = requestId
         }
         val existingType = existingUsers[element.name] ?: (-1).toByte()
         if (existingType < 1) existingUsers[element.name] = 1
     }
 
-    private suspend fun insertFoundUser(element: User.FoundUser) {
+    private suspend fun insertFoundUser(element: User.FoundUser, requestId: Int) {
         UserTable.upsert(
-            onUpdateExclude = listOf(UserTable.firstSeen)
+            onUpdateExclude = listOf(UserTable.firstSeen, UserTable.lastRequested)
         ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
             it[UserTable.slackId] = cachedLinkToSlack(element.avatarUrl)
 
-            it[UserTable.firstSeen] = Clock.System.now()
+            it[UserTable.firstSeen] = requestId
+            it[UserTable.lastRequested] = requestId
         }
         existingUsers.putIfAbsent(element.name, 0)
     }
 
-    private suspend fun insertScrapedUser(element: User.ScrapedUser) {
-        val now = Clock.System.now()
+    private suspend fun insertScrapedUser(element: User.ScrapedUser, requestId: Int) {
         UserTable.upsert(
             onUpdateExclude = listOf(UserTable.firstSeen)
         ) {
@@ -320,9 +351,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[UserTable.followingCount] = element.followingCount
             it[UserTable.pages] = 1
 
-            it[UserTable.firstSeen] = now
-            it[UserTable.lastRequested] = now
-            it[UserTable.lastRequestedIteration] = Scraper.iterationId
+            it[UserTable.firstSeen] = requestId
+            it[UserTable.lastRequested] = requestId
         }
         val existingType = existingUsers[element.name] ?: (-1).toByte()
         if (existingType < 2) existingUsers[element.name] = 2
@@ -332,24 +362,23 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
         ) {
             this[AchievementTable.user] = element.name
             this[AchievementTable.achievement] = it
-            this[AchievementTable.firstSeen] = now
-            this[AchievementTable.lastSeen] = now
-            this[AchievementTable.lastSeenIteration] = Scraper.iterationId
+            this[AchievementTable.firstSeen] = requestId
+            this[AchievementTable.lastSeen] = requestId
         }
         for (post in element.posts) {
-            insertPost(post)
+            insertPost(post, requestId)
         }
     }
 
-    private suspend fun insertSuperStar(element: SuperStar) {
-        insertMissingUser(element.author)
+    private suspend fun insertSuperStar(element: SuperStar, requestId: Int) {
+        insertMissingUser(element.author, requestId)
         if (element.projectId !in existingProjects) insertProject(
             Project.FoundProject(
                 element.projectId,
                 element.author
-            )
+            ),
+            requestId
         )
-        val now = Clock.System.now()
         SuperstarTable.upsert(
             onUpdateExclude = listOf(SuperstarTable.firstSeen)
         ) {
@@ -360,21 +389,20 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[SuperstarTable.views] = element.views
             it[SuperstarTable.reposts] = element.reposts
 
-            it[SuperstarTable.firstSeen] = now
-            it[SuperstarTable.lastSeen] = now
-            it[SuperstarTable.lastSeenIteration] = Scraper.iterationId
+            it[SuperstarTable.firstSeen] = requestId
+            it[SuperstarTable.lastSeen] = requestId
         }
     }
 
-    private suspend fun insertShipEvent(element: ShipEvent) {
-        insertMissingUser(element.author)
+    private suspend fun insertShipEvent(element: ShipEvent, requestId: Int) {
+        insertMissingUser(element.author, requestId)
         if (element.projectId !in existingProjects) insertProject(
             Project.FoundProject(
                 element.projectId,
                 element.author
-            )
+            ),
+            requestId
         )
-        val now = Clock.System.now()
         ShipEventTable.upsert(
             onUpdateExclude = listOf(ShipEventTable.firstSeen)
         ) {
@@ -391,21 +419,20 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[ShipEventTable.attachedMission] = element.mission
             it[ShipEventTable.description] = element.body
 
-            it[ShipEventTable.firstSeen] = now
-            it[ShipEventTable.lastSeen] = now
-            it[ShipEventTable.lastSeenIteration] = Scraper.iterationId
+            it[ShipEventTable.firstSeen] = requestId
+            it[ShipEventTable.lastSeen] = requestId
         }
     }
 
-    private suspend fun insertRepost(element: Repost) {
-        insertMissingUser(element.author)
+    private suspend fun insertRepost(element: Repost, requestId: Int) {
+        insertMissingUser(element.author, requestId)
         if (element.projectId !in existingProjects) insertProject(
             Project.FoundProject(
                 element.projectId,
                 element.devlogAuthor
-            )
+            ),
+            requestId
         )
-        val now = Clock.System.now()
         RepostTable.upsert(
             onUpdateExclude = listOf(RepostTable.firstSeen)
         ) {
@@ -414,22 +441,20 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[RepostTable.createdAt] = element.createdAt
             it[RepostTable.body] = element.message
 
-            it[RepostTable.firstSeen] = now
-            it[RepostTable.lastSeen] = now
-            it[RepostTable.lastSeenIteration] = Scraper.iterationId
+            it[RepostTable.firstSeen] = requestId
+            it[RepostTable.lastSeen] = requestId
         }
     }
 
-    private suspend fun insertDevlog(element: Devlog) {
-        insertMissingUser(element.author)
+    private suspend fun insertDevlog(element: Devlog, requestId: Int) {
+        insertMissingUser(element.author, requestId)
         if (element.projectId !in existingProjects) {
-            insertProject(Project.FoundProject(element.projectId, element.author))
+            insertProject(Project.FoundProject(element.projectId, element.author), requestId)
         }
         if (element.body.length > 4500) {
             logger.warn("Devlog (id: ${element.id} from ${element.projectId}) too long: ${element.body.length} > 4500")
             return
         }
-        val now = Clock.System.now()
         DevlogTable.upsert(
             onUpdateExclude = listOf(DevlogTable.firstSeen)
         ) {
@@ -447,21 +472,24 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
             it[DevlogTable.likes] = element.likesCount
             it[DevlogTable.views] = element.viewsCount
 
-            it[DevlogTable.firstSeen] = now
-            it[DevlogTable.lastSeen] = now
-            it[DevlogTable.lastSeenIteration] = Scraper.iterationId
+            it[DevlogTable.firstSeen] = requestId
+            it[DevlogTable.lastSeen] = requestId
         }
         var attachmentsCount = 0
         DevlogAttachmentsTable.batchUpsert(
-            element.attachments
+            element.attachments,
+            onUpdateExclude = listOf(DevlogAttachmentsTable.firstSeen)
         ) {
             this[DevlogAttachmentsTable.id] = element.id
             this[DevlogAttachmentsTable.number] = attachmentsCount++
             this[DevlogAttachmentsTable.url] = it
+
+            this[DevlogAttachmentsTable.firstSeen] = requestId
+            this[DevlogAttachmentsTable.lastSeen] = requestId
         }
         if (element.comments != null) {
             for (comment in element.comments) {
-                if (comment.author.name !in existingUsers) insertUser(comment.author)
+                if (comment.author.name !in existingUsers) insertUser(comment.author, requestId)
             }
             CommentsTable.batchUpsert(
                 element.comments,
@@ -473,9 +501,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Sendab
                 this[CommentsTable.content] = it.body
                 this[CommentsTable.created] = it.createdAt
 
-                this[CommentsTable.firstSeen] = now
-                this[CommentsTable.lastSeen] = now
-                this[CommentsTable.lastSeenIteration] = Scraper.iterationId
+                this[CommentsTable.firstSeen] = requestId
+                this[CommentsTable.lastSeen] = requestId
             }
         }
     }
