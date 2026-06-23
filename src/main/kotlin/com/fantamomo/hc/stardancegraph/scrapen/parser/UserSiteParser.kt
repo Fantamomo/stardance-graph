@@ -56,6 +56,12 @@ object UserSiteParser {
             logger.warn("Failed to find username in $url")
             return null
         }
+
+        val internalId = main.selectFirst(".profile")?.attr("action")?.removePrefix("/users/")?.toIntOrNull()
+        if (internalId == null) {
+            logger.warn("Failed to find internal ID in $url")
+        }
+
         val joinedElement = profileSection.selectFirst(".profile__joined")
         if (joinedElement == null) {
             logger.warn("Failed to find joined date element in $url")
@@ -138,6 +144,7 @@ object UserSiteParser {
         return User.ScrapedUser(
             name = usernameText,
             avatarUrl = avatarUrl.toString(),
+            internalId = internalId,
             bio = bioText ?: "",
             devlogCount = devlogCount ?: 0,
             projectsCount = projectCount ?: 0,
@@ -175,7 +182,14 @@ object UserSiteParser {
             return null
         }
 
-        return User.UnverifiedUser(usernameText, avatarUrl.toString())
+        val path = url.encodedPath
+        val internalId = if (path.startsWith("/users/")) {
+            path.removePrefix("/users/").toIntOrNull()
+        } else {
+            null
+        }
+
+        return User.UnverifiedUser(usernameText, avatarUrl.toString(), internalId)
     }
 
     private fun parseJoinedDate(text: String): LocalDate {

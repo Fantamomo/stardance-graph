@@ -8,6 +8,7 @@ import com.fantamomo.hc.stardancegraph.scrapen.parser.DevlogParser
 import com.fantamomo.hc.stardancegraph.scrapen.parser.FollowParser
 import com.fantamomo.hc.stardancegraph.scrapen.parser.ProjectParser
 import com.fantamomo.hc.stardancegraph.scrapen.parser.UserSiteParser
+import com.fantamomo.hc.stardancegraph.util.ServerLoadController
 import com.fantamomo.hc.stardancegraph.util.delay.waitingDelay
 import com.fantamomo.hc.stardancegraph.util.plugins.network.RECEIVE_BYTES_KEY
 import com.fantamomo.hc.stardancegraph.util.plugins.network.SEND_BYTES_KEY
@@ -15,15 +16,21 @@ import com.fantamomo.hc.stardancegraph.util.plugins.requests.RequestType
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.slf4j.LoggerFactory
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.incrementAndFetch
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.measureTimedValue
@@ -33,23 +40,62 @@ class SiteScraper(
     val scraped: SendChannel<ScrapedObject>,
     val toScrap: ReceiveChannel<Scrapable>
 ) {
-    suspend fun start() {
-        var scraped = 0
+    private val serverLoadController = ServerLoadController(
+        maxRps = 6.0,
+        overloadWindow = 10.minutes,
+        maxPause = 3.minutes
+    )
+
+    private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
+    private val scrapedCount = AtomicInt(0)
+
+    suspend fun start() = coroutineScope {
+        repeat(semaphore.availablePermits) {
+            launch {
+                semaphore.withPermit {
+                    progress()
+                }
+            }
+            delay(100.milliseconds) // give the request before a head start
+        }
+    }
+
+    private suspend fun progress() {
+        var localRequests = 0
         for (element in toScrap) {
-            scraped++
-            logger.info("[$scraped] Scraping ${element.url}")
+            if (checkOrAddUser(element)) continue
 
-            val scrapedObject = scrape(element)
+            val waitTime = serverLoadController.getWaitTimeOrNull()
+            if (waitTime != null) {
+                logger.warn("RPS was too high for an extended period of time, waiting for $waitTime")
+                delay(waitTime)
+            }
 
-            this.scraped.send(scrapedObject)
+            val number = scrapedCount.incrementAndFetch()
+            localRequests++
+            withContext(CoroutineName("Scraper$$number")) {
+                logger.info("Scraping ${element.url}")
 
-            if (scraped % 100 == 0) {
-                logger.info("Waiting for 5 seconds")
-                waitingDelay(5.seconds)
+                val scrapedObject = scrape(element)
+
+                scraped.send(scrapedObject)
+            }
+
+            if (localRequests % 100 == 0) {
+                logger.info("Waiting for 5 minutes")
+                waitingDelay(5.minutes)
             } /*else if (scraped % 50 == 0) {
                 logger.info("Waiting for 10 seconds")
                 waitingDelay(10.seconds)
             }*/
+        }
+    }
+
+    private fun checkOrAddUser(element: Scrapable): Boolean {
+        return when (element) {
+            is Scrapable.User -> !engine.scrapedUsers.add(element.name)
+            is Scrapable.UserId -> !engine.scrapedUsers.add(element.id)
+            else -> false
         }
     }
 
@@ -75,9 +121,37 @@ class SiteScraper(
         }
         scrapedObject.statusCode = response.status.value
 
+        val body = try {
+            response.bodyAsText()
+        } catch (e: Exception) {
+            logger.error("Failed to read response body from ${element.url}", e)
+            null
+        }
+        scrapedObject.sendBytes = response.call.attributes.getOrNull(SEND_BYTES_KEY)?.toUInt()
+        scrapedObject.receivedBytes = response.call.attributes.getOrNull(RECEIVE_BYTES_KEY)?.toUInt()
+
+        if (body == null) return scrapedObject.build()
+
+        var htmlParseException: Exception? = null
+        val html = try {
+            Jsoup.parse(body)
+        } catch (e: Exception) {
+            logger.error("Failed to parse HTML from ${element.url}", e)
+            htmlParseException = e
+            null
+        }
+        if (html != null) {
+            val devFooter = extractDevFooter(html)
+            if (devFooter != null) {
+                serverLoadController.update(devFooter.requestPerSecond)
+            }
+            scrapedObject.devFooter = devFooter
+        }
+
+        // we are actually checking this only after the parsing of the html, because some error pages still are html and contains important infos like the dev-footer
         if (element is Scrapable.Project && response.status == HttpStatusCode.NotFound) {
             logger.warn("Project not found: ${element.url}")
-            engine.project404ErrorCount++
+            engine.project404ErrorCount.incrementAndFetch()
             return scrapedObject.build()
         }
 
@@ -89,28 +163,19 @@ class SiteScraper(
                     "Server error, waiting for 1 minutes: ${
                         runCatching { response.bodyAsText() }.getOrNull()?.let { "\"$it\"" } ?: "no body"
                     }")
+            } else if (response.status.value == 404) {
+                logger.warn("Requesting ${element.url} returned 404 (${HttpStatusCode.NotFound})")
+                return scrapedObject.build()
             } else {
                 logger.warn("Failed to scrape ${element.url}, status code: ${response.status}, waiting for 1 minutes")
             }
             waitingDelay(1.minutes)
             return scrapedObject.build()
         }
-        val body = try {
-            response.bodyAsText()
-        } catch (e: Exception) {
-            logger.error("Failed to read response body from ${element.url}", e)
-            null
-        }
-        scrapedObject.sendBytes = response.call.attributes.getOrNull(SEND_BYTES_KEY)?.toUInt()
-        scrapedObject.receivedBytes = response.call.attributes.getOrNull(RECEIVE_BYTES_KEY)?.toUInt()
-        if (body == null) return scrapedObject.build()
-        val html = try {
-            Jsoup.parse(body)
-        } catch (e: Exception) {
-            logger.error("Failed to parse HTML from ${element.url}", e)
-            return scrapedObject.build()
-        }
-        scrapedObject.devFooter = extractDevFooter(html)
+
+        @Suppress("KotlinConstantConditions") // I don't know why intellij says that
+        if (html == null || htmlParseException != null) return scrapedObject.build()
+
         val result: Sendable? = try {
             when (element) {
                 is Scrapable.Devlog -> DevlogParser.parse(html, element.url)
@@ -123,6 +188,7 @@ class SiteScraper(
                 )
 
                 is Scrapable.User -> UserSiteParser.parse(html, element.url)
+                is Scrapable.UserId -> UserSiteParser.parse(html, element.url)
                 is Scrapable.PagedUser -> UserSiteParser.parsePagedUser(
                     html,
                     element.url,
@@ -167,7 +233,7 @@ class SiteScraper(
                     siteStats.cacheMisses.addAndFetch(cacheMisses.toInt())
                     return ScrapedObject.DevFooter(
                         build = version,
-                        timeAgo = time.toInt().let { time ->
+                        timeAgo = if (time.isEmpty()) Duration.ZERO else time.toInt().let { time ->
                             when (unit.lowercase()) {
                                 "day", "days" -> time.days
                                 "hour", "hours" -> time.hours
@@ -178,7 +244,7 @@ class SiteScraper(
                         },
                         dbQueries = dbQueries.toUShort(),
                         dbQueriesCached = dbCached.toUShort(),
-                        cacheHits = dbCached.toUShort(),
+                        cacheHits = cacheHits.toUShort(), // all request after 715 are invalid in cacheHits
                         cacheMisses = cacheMisses.toUShort(),
                         requestPerSecond = reqPerSec.toDouble(),
                         signedInUsers = activeUsers.toUShort(),
@@ -198,6 +264,8 @@ class SiteScraper(
 
     companion object {
         private val logger = LoggerFactory.getLogger(SiteScraper::class.java)
+
+        private const val MAX_CONCURRENT_REQUESTS = 4
 
         private val devFooterRegex = Regex(
             """Build (.*?) from (?:about )?(\d+) ([a-z]+) ago\. \(DB: (\d+) quer(?:y|ies)?, (\d+) cached\) \(CACHE: (\d+) hits?, (\d+) misses?\) \(([\d.]+) req/sec\) \(Active: (\d+) signed in, (\d+) visitors\)"""

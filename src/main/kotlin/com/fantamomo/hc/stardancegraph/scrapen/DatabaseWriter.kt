@@ -307,6 +307,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
+            if (element.internalId != null) it[UserTable.internalId] = element.internalId
             it[UserTable.verified] = false
 
             it[UserTable.slackId] = cachedLinkToSlack(element.avatarUrl)
@@ -338,6 +339,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
+            if (element.internalId != null) it[UserTable.internalId] = element.internalId
             it[UserTable.verified] = true
 
             it[UserTable.bio] = element.bio

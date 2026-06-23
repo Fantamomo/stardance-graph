@@ -14,6 +14,11 @@ sealed interface Scrapable {
         }
         override val url: Url = Url("https://stardance.hackclub.com/@$name")
     }
+    data class UserId(
+        val id: Int
+    ) : Scrapable {
+        override val url: Url = Url("https://stardance.hackclub.com/users/$id")
+    }
 
     data class PagedUser(
         val name: String,
