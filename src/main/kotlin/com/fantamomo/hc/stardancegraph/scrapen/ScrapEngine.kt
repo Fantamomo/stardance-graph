@@ -2,7 +2,7 @@ package com.fantamomo.hc.stardancegraph.scrapen
 
 import com.fantamomo.hc.stardancegraph.model.Project
 import com.fantamomo.hc.stardancegraph.model.Scrapable
-import com.fantamomo.hc.stardancegraph.model.Sendable
+import com.fantamomo.hc.stardancegraph.model.ScrapedObject
 import com.fantamomo.hc.stardancegraph.scrapen.data.SiteStats
 import io.ktor.http.*
 import kotlinx.coroutines.*
@@ -16,11 +16,11 @@ import kotlin.time.measureTime
 class ScrapEngine {
     // elements that are sent to the database so that they can be written to the database
     // SENDER: progress, RECEIVER: databaseWriter
-    val databaseChannel = Channel<Sendable>(Channel.UNLIMITED)
+    val databaseChannel = Channel<ScrapedObject>(Channel.UNLIMITED)
 
     // elements that are found on the site and should be processed
     // SENDER: siteScraper, RECEIVER: progress
-    val foundChannel = Channel<Sendable>(Channel.RENDEZVOUS)
+    val foundChannel = Channel<ScrapedObject>(Channel.RENDEZVOUS)
 
     // elements that are to be scraped
     // SENDER: progress, RECEIVER: siteScraper
@@ -80,12 +80,11 @@ class ScrapEngine {
         databaseWriter.waitForReady()
 
         // starting the monster
-        currentWork.incrementAndFetch()
         biggestProjectId = 20000
         for (i in 1..20000) {
             val project = Scrapable.Project(i)
             if (scrapedLinks.add(project.url)) {
-                toScrapeChannel.send(project)
+                sendToScrap(project)
             }
         }
 
@@ -128,30 +127,32 @@ class ScrapEngine {
         for (element in foundChannel) {
             databaseChannel.send(element)
 
-            if (element is Project.ScrapedProject) {
-                biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, element.id)
+            val sendable = element.sendable
+            if (sendable != null) {
+                if (sendable is Project.ScrapedProject) {
+                    biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, sendable.id)
 //                logger.info("biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId")
-                project404ErrorCount = 0
-            }
+                    project404ErrorCount = 0
+                }
 
-            val scrapable = element.getScrapable()
-            if (scrapable.isNotEmpty()) {
-                for (link in scrapable) {
-                    if (link is Scrapable.Project) {
-                        biggestProjectId = maxOf(biggestProjectId, link.id)
-                    }
+                val scrapable = sendable.getScrapable()
+                if (scrapable.isNotEmpty()) {
+                    for (link in scrapable) {
+                        if (link is Scrapable.Project) {
+                            biggestProjectId = maxOf(biggestProjectId, link.id)
+                        }
 
-                    updateStatsFound(link)
+                        updateStatsFound(link)
 
-                    if (scrapedLinks.add(link.url)) {
-                        updateStatsUnique(link)
-                        sendToToScrape++
-                        if (sendToToScrape <= LIMIT_SCRAPES) {
-                            currentWork.incrementAndFetch()
-                            toScrapeChannel.send(link)
-                        } else if (!sendLimitError) {
-                            logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
-                            sendLimitError = true
+                        if (scrapedLinks.add(link.url)) {
+                            updateStatsUnique(link)
+                            sendToToScrape++
+                            if (sendToToScrape <= LIMIT_SCRAPES) {
+                                sendToScrap(link)
+                            } else if (!sendLimitError) {
+                                logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
+                                sendLimitError = true
+                            }
                         }
                     }
                 }
@@ -166,8 +167,7 @@ class ScrapEngine {
                         val project = Scrapable.Project(nextProjectId)
                         biggestProjectId = nextProjectId
                         if (scrapedLinks.add(project.url)) {
-                            currentWork.incrementAndFetch()
-                            toScrapeChannel.send(project)
+                            sendToScrap(project)
                             success = true
                             break
                         }
@@ -195,6 +195,11 @@ class ScrapEngine {
                 }
             }
         }
+    }
+
+    private suspend fun sendToScrap(element: Scrapable) {
+        currentWork.incrementAndFetch()
+        toScrapeChannel.send(element)
     }
 
     @Suppress("DuplicatedCode")

@@ -4,11 +4,11 @@ import com.fantamomo.hc.stardancegraph.App
 import com.fantamomo.hc.stardancegraph.db.RequestIterationsTable
 import com.fantamomo.hc.stardancegraph.manager.DatabaseManager
 import com.fantamomo.hc.stardancegraph.util.Logger
-import com.fantamomo.hc.stardancegraph.util.statistics.delay.WaitingDelay
-import com.fantamomo.hc.stardancegraph.util.statistics.network.NetworkStats
-import com.fantamomo.hc.stardancegraph.util.statistics.requests.RequestStatistics
-import com.fantamomo.hc.stardancegraph.util.statistics.requests.RequestStatisticsContext
-import com.fantamomo.hc.stardancegraph.util.statistics.requests.RequestType
+import com.fantamomo.hc.stardancegraph.util.delay.WaitingDelay
+import com.fantamomo.hc.stardancegraph.util.plugins.network.NetworkStats
+import com.fantamomo.hc.stardancegraph.util.plugins.requests.RequestStatistics
+import com.fantamomo.hc.stardancegraph.util.plugins.requests.RequestStatisticsContext
+import com.fantamomo.hc.stardancegraph.util.plugins.requests.RequestType
 import kotlinx.coroutines.*
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.r2dbc.insert
