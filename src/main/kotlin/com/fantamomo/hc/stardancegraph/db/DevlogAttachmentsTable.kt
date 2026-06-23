@@ -7,5 +7,8 @@ object DevlogAttachmentsTable : Table("devlog_attachments") {
     val number = integer("number") // a devlog can have maximum 4 attachments
     val url = varchar("url", 1_000)
 
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
+
     override val primaryKey = PrimaryKey(id, number)
 }

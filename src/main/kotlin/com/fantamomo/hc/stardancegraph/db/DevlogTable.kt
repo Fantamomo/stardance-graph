@@ -26,14 +26,12 @@ object DevlogTable : Table("devlogs") {
     val createdAt = timestamp("created_at")
     val timeLogged = duration("time_logged")
 
-    val firstSeen = timestamp("first_seen")
 
-    val lastSeen = timestamp("last_seen")
-    val lastSeenIteration = reference("last_seen_iteration", RequestIterationsTable.id)
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
 
     // those could possibly always be null if the devlog never gets comments
-    val lastRequested = timestamp("last_requested").nullable()
-    val lastRequestedIteration = reference("last_requested_iteration", RequestIterationsTable.id).nullable()
+    val lastRequested = reference("last_requested", RequestTable.id).nullable()
 
     override val primaryKey = PrimaryKey(id)
 }

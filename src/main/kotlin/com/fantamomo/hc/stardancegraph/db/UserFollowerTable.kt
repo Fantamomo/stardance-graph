@@ -1,7 +1,6 @@
 package com.fantamomo.hc.stardancegraph.db
 
 import org.jetbrains.exposed.v1.core.Table
-import org.jetbrains.exposed.v1.datetime.timestamp
 
 object UserFollowerTable : Table("user_followers") {
     val user = reference("user", UserTable.name)
@@ -9,10 +8,9 @@ object UserFollowerTable : Table("user_followers") {
     // the person who follows the user
     val follower = reference("follower", UserTable.name)
 
-    val firstSeen = timestamp("first_seen")
+    val firstSeen = reference("first_seen", RequestTable.id)
 
-    val lastSeen = timestamp("last_seen")
-    val lastSeenIteration = reference("last_seen_iteration", RequestIterationsTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
 
     init {
         index(false, user)

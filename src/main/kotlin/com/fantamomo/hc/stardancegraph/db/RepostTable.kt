@@ -11,9 +11,8 @@ object RepostTable : Table("reposts") {
 
     val body = varchar("content", 4_000).nullable()
 
-    val firstSeen = timestamp("first_seen")
-    val lastSeen = timestamp("last_seen")
-    val lastSeenIteration = reference("last_seen_iteration", RequestIterationsTable.id)
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
 
     override val primaryKey = PrimaryKey(devlog, by)
 }

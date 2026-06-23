@@ -1,7 +1,6 @@
 package com.fantamomo.hc.stardancegraph.db
 
 import org.jetbrains.exposed.v1.core.Table
-import org.jetbrains.exposed.v1.datetime.timestamp
 
 object UserTable : Table("users") {
     val name = varchar("name", 50) // the maximum length is 30 in app/models/user.rb, but legacy names could have been longer, so we use maximum length of 50 here
@@ -20,9 +19,8 @@ object UserTable : Table("users") {
     val followingCount = integer("following_count").nullable()
     val pages = integer("pages").nullable()
 
-    val firstSeen = timestamp("first_seen")
-    val lastRequested = timestamp("last_requested").nullable()
-    val lastRequestedIteration = reference("last_requested_iteration", RequestIterationsTable.id).nullable()
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastRequested = reference("last_requested", RequestTable.id)
 
     override val primaryKey = PrimaryKey(name)
 }
