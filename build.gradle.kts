@@ -21,7 +21,7 @@ dependencies {
     implementation(libs.postgresql)
     runtimeOnly(libs.postgresql.r2dbc)
     implementation(ktorLibs.client.core)
-    implementation(ktorLibs.client.cio)
+    implementation(ktorLibs.client.okhttp)
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0-0.6.x-compat")
     implementation("org.jsoup:jsoup:1.22.2")
 }
