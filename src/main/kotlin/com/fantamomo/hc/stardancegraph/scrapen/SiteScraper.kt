@@ -8,6 +8,7 @@ import com.fantamomo.hc.stardancegraph.scrapen.parser.DevlogParser
 import com.fantamomo.hc.stardancegraph.scrapen.parser.FollowParser
 import com.fantamomo.hc.stardancegraph.scrapen.parser.ProjectParser
 import com.fantamomo.hc.stardancegraph.scrapen.parser.UserSiteParser
+import com.fantamomo.hc.stardancegraph.util.RateLimiter
 import com.fantamomo.hc.stardancegraph.util.ServerLoadController
 import com.fantamomo.hc.stardancegraph.util.delay.waitingDelay
 import com.fantamomo.hc.stardancegraph.util.plugins.network.RECEIVE_BYTES_KEY
@@ -24,6 +25,7 @@ import kotlinx.coroutines.sync.withPermit
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.slf4j.LoggerFactory
+import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.incrementAndFetch
 import kotlin.time.Clock
@@ -33,6 +35,7 @@ import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 import kotlin.time.measureTimedValue
 
 class SiteScraper(
@@ -40,30 +43,64 @@ class SiteScraper(
     val scraped: SendChannel<ScrapedObject>,
     val toScrap: ReceiveChannel<Scrapable>
 ) {
+    // we have two systems for rate limiting
+    // 1. the server has rate limits, so we can't scrape too fast, it allows 120 requests per minute
+    private val rateLimiter = RateLimiter(SERVER_RATE_LIMIT_PER_MINUTE)
+    // 2. if the server is overloaded, we check this by looking at the dev-footer, which contains the requests per seconds
+    //    and if the server is for 10 seconds over 8 requests per second, we are waiting some time to avoid overloading the server
     private val serverLoadController = ServerLoadController(
-        maxRps = 6.0,
-        overloadWindow = 10.minutes,
+        maxRps = 8.0,
+        overloadWindow = 10.seconds,
         maxPause = 3.minutes
     )
 
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val scrapedCount = AtomicInt(0)
 
+    private val rateLimited = AtomicBoolean(false)
+    private var rateLimitedUntil: Instant? = null
+
     suspend fun start() = coroutineScope {
-        repeat(semaphore.availablePermits) {
-            launch {
+        repeat(semaphore.availablePermits) { scraperId ->
+            launch(CoroutineName("Scraper$$scraperId")) {
                 semaphore.withPermit {
-                    progress()
+                    progress(scraperId)
                 }
             }
-            delay(100.milliseconds) // give the request before a head start
+            delay(10.milliseconds) // give the launch a head start
         }
     }
 
-    private suspend fun progress() {
+    private suspend fun progress(scraperId: Int) {
         var localRequests = 0
+        var dbOverloaded = false
         for (element in toScrap) {
             if (checkOrAddUser(element)) continue
+
+            val rateLimitedUntil = rateLimitedUntil
+            if (rateLimitedUntil != null) {
+                val duration = rateLimitedUntil - Clock.System.now()
+                if (duration.isPositive()) {
+//                    logger.warn("Too many requests, waiting for $duration") // no need to log this, it's already logged when we get rate limited
+                    // we are rate limited, so we are waiting
+                    waitingDelay(duration)
+                } else {
+                    // we are not rate limited anymore, so we can scrape again
+                    if (rateLimited.compareAndSet(expectedValue = true, newValue = false)) {
+                        this.rateLimitedUntil = null
+                    }
+                }
+            }
+
+            val dbChannelSize = engine.databaseChannelSize.load()
+            if (dbChannelSize > (if (dbOverloaded) 100 else 500)) {
+                dbOverloaded = true
+                logger.warn("DatabaseWriter is overloaded, waiting for 30 seconds, to give it time to catch up")
+                waitingDelay(30.seconds)
+                continue
+            } else {
+                dbOverloaded = false
+            }
 
             val waitTime = serverLoadController.getWaitTimeOrNull()
             if (waitTime != null) {
@@ -71,9 +108,11 @@ class SiteScraper(
                 delay(waitTime)
             }
 
+            rateLimiter.acquire(::waitingDelay)
+
             val number = scrapedCount.incrementAndFetch()
             localRequests++
-            withContext(CoroutineName("Scraper$$number")) {
+            withContext(CoroutineName("Scraper$scraperId-$number")) {
                 logger.info("Scraping ${element.url}")
 
                 val scrapedObject = scrape(element)
@@ -81,13 +120,14 @@ class SiteScraper(
                 scraped.send(scrapedObject)
             }
 
-            if (localRequests % 100 == 0) {
+            /*if (localRequests % 100 == 0) {
                 logger.info("Waiting for 5 minutes")
                 waitingDelay(5.minutes)
-            } /*else if (scraped % 50 == 0) {
+            }*/ /*else if (scraped % 50 == 0) {
                 logger.info("Waiting for 10 seconds")
                 waitingDelay(10.seconds)
             }*/
+//            waitingDelay(1.seconds)
         }
     }
 
@@ -157,7 +197,12 @@ class SiteScraper(
 
         if (response.status != HttpStatusCode.OK) {
             if (response.status == HttpStatusCode.TooManyRequests) {
-                logger.warn("Too many requests, waiting for 5 minutes")
+                if (rateLimited.compareAndSet(expectedValue = false, newValue = true)) {
+                    val retryAfter = response.headers[HttpHeaders.RetryAfter]?.toLongOrNull()?.seconds ?: 1.minutes
+                    rateLimitedUntil = Clock.System.now() + retryAfter
+                    logger.warn("Too many requests, waiting for $retryAfter")
+                } // else we are already rate limited, so we don't need to do anything
+                return scrapedObject.build()
             } else if (response.status.value in 500..599) {
                 logger.warn(
                     "Server error, waiting for 1 minutes: ${
@@ -265,10 +310,12 @@ class SiteScraper(
     companion object {
         private val logger = LoggerFactory.getLogger(SiteScraper::class.java)
 
-        private const val MAX_CONCURRENT_REQUESTS = 4
+        private const val MAX_CONCURRENT_REQUESTS = 5
+
+        private const val SERVER_RATE_LIMIT_PER_MINUTE = 120
+        private const val SERVER_RATE_LIMIT_PER_5_MINUTES = 600
 
         private val devFooterRegex = Regex(
-            """Build (.*?) from (?:about )?(\d+) ([a-z]+) ago\. \(DB: (\d+) quer(?:y|ies)?, (\d+) cached\) \(CACHE: (\d+) hits?, (\d+) misses?\) \(([\d.]+) req/sec\) \(Active: (\d+) signed in, (\d+) visitors\)"""
-        )
+            """Build (.*?) from (?:(?:about )?(\d+) ([a-z]+)|less than a minute) ago\. \(DB: (\d+) quer(?:y|ies), (\d+) cached\) \(CACHE: (\d+) hits?, (\d+) misses?\) \(([\d.]+) req/sec\) \(Active: (\d+) signed in, (\d+) visitors\)"""        )
     }
 }
