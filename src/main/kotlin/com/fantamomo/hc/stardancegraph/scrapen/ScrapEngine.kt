@@ -19,6 +19,7 @@ class ScrapEngine {
     // elements that are sent to the database so that they can be written to the database
     // SENDER: progress, RECEIVER: databaseWriter
     val databaseChannel = Channel<ScrapedObject>(Channel.UNLIMITED)
+    val databaseChannelSize = AtomicInt(0)
 
     // elements that are found on the site and should be processed
     // SENDER: siteScraper, RECEIVER: progress
@@ -140,6 +141,7 @@ class ScrapEngine {
         var sendLimitError = false
         for (element in foundChannel) {
             databaseChannel.send(element)
+            databaseChannelSize.incrementAndFetch()
 
             val sendable = element.sendable
             if (sendable != null) {

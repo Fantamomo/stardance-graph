@@ -8,14 +8,13 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
-import org.jetbrains.exposed.v1.r2dbc.batchUpsert
-import org.jetbrains.exposed.v1.r2dbc.insertAndGetId
-import org.jetbrains.exposed.v1.r2dbc.select
-import org.jetbrains.exposed.v1.r2dbc.upsert
+import org.jetbrains.exposed.v1.r2dbc.*
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.concurrent.atomics.incrementAndFetch
+import kotlin.time.measureTime
 
 class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<ScrapedObject>) {
     // 0 = found, 1 = unverified, 2 = scraped
@@ -32,6 +31,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
     val databaseRequests: Int
         get() = databaseRequestsInternal.load()
+
+    private var savingJob: Job? = null
 
     @OptIn(DelicateCoroutinesApi::class)
     suspend fun start() = coroutineScope {
@@ -53,13 +54,20 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         while (isActive && !channel.isClosedForReceive) {
             val elements = mutableListOf<ScrapedObject>()
             elements.add(channel.receive())
+            engine.databaseChannelSize.decrementAndFetch()
             while (isActive && !channel.isClosedForReceive) {
                 val element = channel.tryReceive()
-                if (element.isSuccess) elements.add(element.getOrThrow())
-                else break
+                if (element.isSuccess) {
+                    elements.add(element.getOrThrow())
+                    engine.databaseChannelSize.decrementAndFetch()
+                } else break
+                if (elements.size >= 200 && !shouldStop.load()) {
+                    logger.warn("Received ${elements.size} elements in a row, saving to database now. Current objects still in channel: ${engine.databaseChannelSize.load()}")
+                    break
+                }
             }
             if (elements.isNotEmpty()) {
-                saveToDatabase(elements)
+                saveToDb(elements)
             }
             @OptIn(ExperimentalCoroutinesApi::class)
             if (shouldStop.load()) {
@@ -80,20 +88,84 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         shouldStop.store(true)
     }
 
+    private suspend fun CoroutineScope.saveToDb(elements: List<ScrapedObject>) {
+        savingJob?.join()
+        savingJob = launch {
+//            logger.info("Saving ${elements.size} elements to database")
+            val duration = measureTime {
+                saveToDatabase(elements)
+            }
+            logger.info("Saved ${elements.size} elements to database in ${duration.inWholeMilliseconds}ms")
+        }
+    }
+
     private suspend fun saveToDatabase(elements: List<ScrapedObject>) {
         try {
-            DatabaseManager.transaction {
-                databaseRequestsInternal.incrementAndFetch()
-                elements.forEach { element ->
-                    try {
-                        insert(element)
-                    } catch (e: Exception) {
-                        logger.error("Error saving ${element::class.java.name} to database", e)
+            var slowInsert = true
+            if (elements.size > 5) {
+                // if the size is greater than 5, we will try to insert optimized so that it is faster,
+                // but the chance that something goes wrong is higher, so if something goes wrong, we will insert manually
+                try {
+                    DatabaseManager.transaction {
+                        insertOptimised(elements)
+                    }
+                    slowInsert = false
+                } catch (e: Exception) {
+                    logger.error("Error saving to database", e)
+                }
+            }
+            if (slowInsert) {
+                DatabaseManager.transaction {
+                    databaseRequestsInternal.incrementAndFetch()
+                    elements.forEach { element ->
+                        try {
+                            insert(element)
+                        } catch (e: Exception) {
+                            logger.error("Error saving ${element::class.java.name} to database", e)
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
             logger.error("Error saving to database", e)
+        }
+    }
+
+    private suspend fun insertOptimised(elements: List<ScrapedObject>) {
+        val insertedIds = RequestTable.batchInsert(elements) { obj ->
+            this[RequestTable.url] = obj.url.toString()
+            this[RequestTable.method] = obj.method.value
+            this[RequestTable.type] = obj.type.name
+
+            this[RequestTable.requestedAt] = obj.requestedAt
+            this[RequestTable.duration] = obj.duration
+            this[RequestTable.statusCode] = obj.statusCode.toShort()
+            this[RequestTable.result] =
+                obj.sendable?.let { sendable -> sendable::class.java.simpleName }
+
+            this[RequestTable.sendBytes] = obj.sendBytes
+            this[RequestTable.receiveBytes] = obj.receivedBytes
+
+            val footer = obj.devFooter
+            if (footer != null) {
+                this[RequestTable.serverBuild] = footer.build
+                this[RequestTable.serverBuildAgo] = footer.timeAgo
+                this[RequestTable.serverDbQueries] = footer.dbQueries
+                this[RequestTable.serverDbCached] = footer.dbQueriesCached
+                this[RequestTable.serverCacheHits] = footer.cacheHits
+                this[RequestTable.serverCacheMisses] = footer.cacheMisses
+                this[RequestTable.serverRequestPerSecond] = footer.requestPerSecond
+                this[RequestTable.serverActiveUsersSignIn] = footer.signedInUsers
+                this[RequestTable.serverActiveUsersVisitors] = footer.visitors
+            }
+
+            this[RequestTable.requestIteration] = Scraper.iterationId
+        }.map { it[RequestTable.id].value }
+
+        elements.forEachIndexed { index, obj ->
+            val sendable = obj.sendable ?: return@forEachIndexed
+            val requestId = insertedIds[index]
+            insertSendable(sendable, requestId)
         }
     }
 
@@ -158,7 +230,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         for (follower in element.following) insertMissingUser(follower, requestId)
         UserFollowerTable.batchUpsert(
             element.following,
-            onUpdateExclude = listOf(UserFollowerTable.firstSeen)
+            onUpdateExclude = listOf(UserFollowerTable.firstSeen),
+            shouldReturnGeneratedValues = false
         ) {
             this[UserFollowerTable.follower] = element.user.name
             this[UserFollowerTable.user] = it.name
@@ -172,7 +245,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         for (follower in element.follower) insertMissingUser(follower, requestId)
         UserFollowerTable.batchUpsert(
             element.follower,
-            onUpdateExclude = listOf(UserFollowerTable.firstSeen)
+            onUpdateExclude = listOf(UserFollowerTable.firstSeen),
+            shouldReturnGeneratedValues = false
         ) {
             this[UserFollowerTable.follower] = it.name
             this[UserFollowerTable.user] = element.user.name
@@ -186,7 +260,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         for (follower in element.followers) insertMissingUser(follower, requestId)
         ProjectFollowersTable.batchUpsert(
             element.followers,
-            onUpdateExclude = listOf(ProjectFollowersTable.firstSeen)
+            onUpdateExclude = listOf(ProjectFollowersTable.firstSeen),
+            shouldReturnGeneratedValues = false
         ) {
             this[ProjectFollowersTable.project] = element.project
             this[ProjectFollowersTable.follower] = it.name
@@ -360,7 +435,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         if (existingType < 2) existingUsers[element.name] = 2
         AchievementTable.batchUpsert(
             element.achievements,
-            onUpdateExclude = listOf(AchievementTable.firstSeen)
+            onUpdateExclude = listOf(AchievementTable.firstSeen),
+            shouldReturnGeneratedValues = false
         ) {
             this[AchievementTable.user] = element.name
             this[AchievementTable.achievement] = it
@@ -480,7 +556,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         var attachmentsCount = 0
         DevlogAttachmentsTable.batchUpsert(
             element.attachments,
-            onUpdateExclude = listOf(DevlogAttachmentsTable.firstSeen)
+            onUpdateExclude = listOf(DevlogAttachmentsTable.firstSeen),
+            shouldReturnGeneratedValues = false
         ) {
             this[DevlogAttachmentsTable.id] = element.id
             this[DevlogAttachmentsTable.number] = attachmentsCount++
@@ -495,7 +572,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             }
             CommentsTable.batchUpsert(
                 element.comments,
-                onUpdateExclude = listOf(CommentsTable.firstSeen)
+                onUpdateExclude = listOf(CommentsTable.firstSeen),
+                shouldReturnGeneratedValues = false
             ) {
                 this[CommentsTable.devlog] = element.id
                 this[CommentsTable.number] = it.number
