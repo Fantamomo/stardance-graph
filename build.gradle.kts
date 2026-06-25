@@ -41,5 +41,6 @@ exposed {
     migrations {
         tablesPackage.set("com.fantamomo.hc.stardancegraph.db")
         testContainersImageName.set("postgres:latest")
+        fileDirectory.set(layout.projectDirectory.dir("src/main/resources/db/migration"))
     }
 }
