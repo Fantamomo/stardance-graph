@@ -12,8 +12,10 @@ sealed interface Scrapable {
         init {
             if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
         }
+
         override val url: Url = Url("https://stardance.hackclub.com/@$name")
     }
+
     data class UserId(
         val id: Int
     ) : Scrapable {
@@ -28,6 +30,7 @@ sealed interface Scrapable {
         init {
             if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
         }
+
         override val url: Url = Url("https://stardance.hackclub.com/@$name?page=$page")
     }
 
@@ -64,4 +67,13 @@ sealed interface Scrapable {
     ) : Scrapable {
         override val url: Url = Url("https://stardance.hackclub.com/projects/$id/followers")
     }
+
+    data class WrappedScrapable<D>(val scrapable: Scrapable, val data: D) : Scrapable {
+        override val url: Url
+            get() = throw UnsupportedOperationException("Cannot get url from wrapped scrapable, please unwrap it first")
+
+        override fun unwrap() = scrapable.unwrap()
+    }
+
+    fun unwrap(): Scrapable = this
 }
