@@ -112,10 +112,10 @@ class SiteScraper(
 
             val number = scrapedCount.incrementAndFetch()
             localRequests++
-            withContext(CoroutineName("Scraper$scraperId-$number")) {
+            withContext(CoroutineName("Scraper$$scraperId-$number")) {
                 logger.info("Scraping ${element.url}")
 
-                val scrapedObject = scrape(element)
+                val scrapedObject = scrape(element, scraperId)
 
                 scraped.send(scrapedObject)
             }
@@ -139,8 +139,9 @@ class SiteScraper(
         }
     }
 
-    private suspend fun scrape(element: Scrapable): ScrapedObject {
+    private suspend fun scrape(element: Scrapable, scraperId: Int): ScrapedObject {
         val scrapedObject = ScrapedObject.Builder()
+        scrapedObject.scraperId = scraperId.toShort()
         scrapedObject.url = element.url
         scrapedObject.type = RequestType.parse(element.url)
         scrapedObject.method = HttpMethod.Get

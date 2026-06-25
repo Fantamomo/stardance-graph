@@ -8,6 +8,7 @@ object RequestTable : IntIdTable("requests") {
 
 //    // request id, unique per iteration
 //    val number = integer("number")
+    val scraper = short("scraper")
 
 
     // the url of the request, including the protocol and path

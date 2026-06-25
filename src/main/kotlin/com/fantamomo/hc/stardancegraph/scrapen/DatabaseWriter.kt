@@ -14,7 +14,6 @@ import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.concurrent.atomics.incrementAndFetch
-import kotlin.time.measureTime
 
 class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<ScrapedObject>) {
     // 0 = found, 1 = unverified, 2 = scraped
@@ -92,10 +91,10 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         savingJob?.join()
         savingJob = launch {
 //            logger.info("Saving ${elements.size} elements to database")
-            val duration = measureTime {
+//            val duration = measureTime {
                 saveToDatabase(elements)
-            }
-            logger.info("Saved ${elements.size} elements to database in ${duration.inWholeMilliseconds}ms")
+//            }
+//            logger.info("Saved ${elements.size} elements to database in ${duration.inWholeMilliseconds}ms")
         }
     }
 
@@ -133,6 +132,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
     private suspend fun insertOptimised(elements: List<ScrapedObject>) {
         val insertedIds = RequestTable.batchInsert(elements) { obj ->
+            this[RequestTable.scraper] = obj.scraperId
             this[RequestTable.url] = obj.url.toString()
             this[RequestTable.method] = obj.method.value
             this[RequestTable.type] = obj.type.name
@@ -172,6 +172,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
     private suspend fun insert(obj: ScrapedObject) {
         val sendable = obj.sendable
         val requestId = RequestTable.insertAndGetId {
+            it[RequestTable.scraper] = obj.scraperId
             it[RequestTable.url] = obj.url.toString()
             it[RequestTable.method] = obj.method.value
             it[RequestTable.type] = obj.type.name

@@ -7,6 +7,7 @@ import kotlin.time.Instant
 
 class ScrapedObject(
     val sendable: Sendable?,
+    val scraperId: Short,
     val url: Url,
     val type: RequestType,
     val method: HttpMethod,
@@ -31,6 +32,7 @@ class ScrapedObject(
 
     class Builder {
         var sendable: Sendable? = null
+        var scraperId: Short = 0
         var url: Url? = null
         var type: RequestType? = null
         var method: HttpMethod? = null
@@ -43,6 +45,7 @@ class ScrapedObject(
 
         fun build() = ScrapedObject(
             sendable,
+            scraperId,
             url!!,
             type!!,
             method!!,
