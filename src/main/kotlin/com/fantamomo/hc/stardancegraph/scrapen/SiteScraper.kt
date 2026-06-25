@@ -18,9 +18,13 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -32,7 +36,6 @@ import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
@@ -46,6 +49,7 @@ class SiteScraper(
     // we have two systems for rate limiting
     // 1. the server has rate limits, so we can't scrape too fast, it allows 120 requests per minute
     private val rateLimiter = RateLimiter(SERVER_RATE_LIMIT_PER_MINUTE)
+
     // 2. if the server is overloaded, we check this by looking at the dev-footer, which contains the requests per seconds
     //    and if the server is for 10 seconds over 8 requests per second, we are waiting some time to avoid overloading the server
     private val serverLoadController = ServerLoadController(
@@ -54,7 +58,13 @@ class SiteScraper(
         maxPause = 3.minutes
     )
 
-//    private val failedScrapable = mutableSetOf<Scrapable>()
+    private val toScrapMutex = Mutex()
+
+    // if we fail to scrape a scrapable, we put it in this channel
+    // it is prioritized over toScrap, so that
+    private val failedScrapable = Channel<Scrapable.WrappedScrapable<Retry>>()
+
+    data class Retry(val retry: Int)
 
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val scrapedCount = AtomicInt(0)
@@ -75,14 +85,14 @@ class SiteScraper(
                     progress(scraperId)
                 }
             }
-            delay(10.milliseconds) // give the launch a head start
         }
     }
 
     private suspend fun progress(scraperId: Int) {
         var localRequests = 0
         var dbOverloaded = false
-        for (element in toScrap) {
+        while (true) {
+            val element = nextScrapable()
             if (checkOrAddUser(element)) continue
 
             val rateLimitedUntil = rateLimitedUntil
@@ -139,6 +149,18 @@ class SiteScraper(
         }
     }
 
+    private suspend fun nextScrapable(): Scrapable = toScrapMutex.withLock {
+        select {
+            failedScrapable.onReceive {
+                logger.warn("Retrying ${it.data} (retry ${it.data.retry})")
+                it
+            }
+            toScrap.onReceive {
+                it
+            }
+        }
+    }
+
     private fun checkOrAddUser(element: Scrapable): Boolean {
         return when (element) {
             is Scrapable.User -> !engine.scrapedUsers.add(element.name)
@@ -147,7 +169,9 @@ class SiteScraper(
         }
     }
 
-    private suspend fun scrape(element: Scrapable, scraperId: Int): ScrapedObject {
+    private suspend fun scrape(toScrap: Scrapable, scraperId: Int): ScrapedObject {
+        val element = toScrap.unwrap()
+
         val scrapedObject = ScrapedObject.Builder()
         scrapedObject.scraperId = scraperId.toShort()
         scrapedObject.url = element.url
@@ -166,6 +190,7 @@ class SiteScraper(
         scrapedObject.duration = duration
         if (response == null) {
             scrapedObject.statusCode = -1
+            toScrap.retry()
             return scrapedObject.build()
         }
         scrapedObject.statusCode = response.status.value
@@ -179,7 +204,10 @@ class SiteScraper(
         scrapedObject.sendBytes = response.call.attributes.getOrNull(SEND_BYTES_KEY)?.toUInt()
         scrapedObject.receivedBytes = response.call.attributes.getOrNull(RECEIVE_BYTES_KEY)?.toUInt()
 
-        if (body == null) return scrapedObject.build()
+        if (body == null) {
+            toScrap.retry()
+            return scrapedObject.build()
+        }
 
         var htmlParseException: Exception? = null
         val html = try {
@@ -225,12 +253,15 @@ class SiteScraper(
                 logger.warn("Failed to scrape ${element.url}, status code: ${response.status}, waiting for 1 minutes")
             }
             waitingDelay(1.minutes)
-//            failedScrapable.add(element) // only add it after the delay, so that another scraper dont scrape it directly again
+            toScrap.retry() // only add it after the delay, so that another scraper dont scrape it directly again
             return scrapedObject.build()
         }
 
         @Suppress("KotlinConstantConditions") // I don't know why intellij says that
-        if (html == null || htmlParseException != null) return scrapedObject.build()
+        if (html == null || htmlParseException != null) {
+            toScrap.retry()
+            return scrapedObject.build()
+        }
 
         val result: Sendable? = try {
             when (element) {
@@ -254,9 +285,11 @@ class SiteScraper(
 
                 is Scrapable.UserFollowers -> FollowParser.parseUserFollowers(html, element.url, element.user)
                 is Scrapable.UserFollowing -> FollowParser.parseUserFollowing(html, element.url, element.user)
+                is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $element") // should never happen
             }
         } catch (e: Exception) {
             logger.error("Failed to analyze ${element.url}", e)
+            toScrap.retry()
             return scrapedObject.build()
         }
         if (result != null) {
@@ -264,6 +297,7 @@ class SiteScraper(
             scrapedObject.sendable = result
         } else {
             logger.warn("Failed to analyze ${element.url}")
+            toScrap.retry()
         }
         return scrapedObject.build()
     }
@@ -318,6 +352,18 @@ class SiteScraper(
         return null
     }
 
+    private suspend fun Scrapable.retry() {
+        val retry = ((this as? Scrapable.WrappedScrapable<*>)?.data as? Retry)?.retry ?: 0
+
+        if (retry >= 3) {
+            logger.warn("Failed to scrape ${unwrap().url} after 3 retries")
+            return
+        }
+
+        val wrapped = Scrapable.WrappedScrapable(unwrap(), Retry(retry + 1))
+        failedScrapable.send(wrapped)
+    }
+
     companion object {
         private val logger = LoggerFactory.getLogger(SiteScraper::class.java)
 
@@ -327,6 +373,7 @@ class SiteScraper(
         private const val SERVER_RATE_LIMIT_PER_5_MINUTES = 600
 
         private val devFooterRegex = Regex(
-            """Build (.*?) from (?:(?:about )?(\d+) ([a-z]+)|less than a minute) ago\. \(DB: (\d+) quer(?:y|ies), (\d+) cached\) \(CACHE: (\d+) hits?, (\d+) misses?\) \(([\d.]+) req/sec\) \(Active: (\d+) signed in, (\d+) visitors\)"""        )
+            """Build (.*?) from (?:(?:about )?(\d+) ([a-z]+)|less than a minute) ago\. \(DB: (\d+) quer(?:y|ies), (\d+) cached\) \(CACHE: (\d+) hits?, (\d+) misses?\) \(([\d.]+) req/sec\) \(Active: (\d+) signed in, (\d+) visitors\)"""
+        )
     }
 }
