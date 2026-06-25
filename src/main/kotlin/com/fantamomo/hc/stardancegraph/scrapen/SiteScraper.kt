@@ -54,6 +54,8 @@ class SiteScraper(
         maxPause = 3.minutes
     )
 
+//    private val failedScrapable = mutableSetOf<Scrapable>()
+
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val scrapedCount = AtomicInt(0)
 
@@ -64,6 +66,12 @@ class SiteScraper(
         repeat(semaphore.availablePermits) { scraperId ->
             launch(CoroutineName("Scraper$$scraperId")) {
                 semaphore.withPermit {
+                    try {
+                        // requesting a resource directly, so that the client can open MAX_CONCURRENT_REQUESTS simultaneously, for faster requests
+                        SharedValues.client.get("https://stardance.hackclub.com/up")
+                    } catch (_: Throwable) {
+                        // ignore
+                    }
                     progress(scraperId)
                 }
             }
@@ -121,8 +129,8 @@ class SiteScraper(
             }
 
             /*if (localRequests % 100 == 0) {
-                logger.info("Waiting for 5 minutes")
-                waitingDelay(5.minutes)
+                logger.info("Waiting for 1 minutes")
+                waitingDelay(1.minutes)
             }*/ /*else if (scraped % 50 == 0) {
                 logger.info("Waiting for 10 seconds")
                 waitingDelay(10.seconds)
@@ -203,6 +211,7 @@ class SiteScraper(
                     rateLimitedUntil = Clock.System.now() + retryAfter
                     logger.warn("Too many requests, waiting for $retryAfter")
                 } // else we are already rate limited, so we don't need to do anything
+//                failedScrapable.add(element)
                 return scrapedObject.build()
             } else if (response.status.value in 500..599) {
                 logger.warn(
@@ -210,12 +219,13 @@ class SiteScraper(
                         runCatching { response.bodyAsText() }.getOrNull()?.let { "\"$it\"" } ?: "no body"
                     }")
             } else if (response.status.value == 404) {
-                logger.warn("Requesting ${element.url} returned 404 (${HttpStatusCode.NotFound})")
+                logger.warn("Requesting ${element.url} returned ${HttpStatusCode.NotFound}")
                 return scrapedObject.build()
             } else {
                 logger.warn("Failed to scrape ${element.url}, status code: ${response.status}, waiting for 1 minutes")
             }
             waitingDelay(1.minutes)
+//            failedScrapable.add(element) // only add it after the delay, so that another scraper dont scrape it directly again
             return scrapedObject.build()
         }
 
