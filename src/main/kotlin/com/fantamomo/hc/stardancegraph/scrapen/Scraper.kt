@@ -122,7 +122,9 @@ object Scraper {
 
     private suspend fun run(): ScrapEngine.Result {
         engine = ScrapEngine()
-        val result = engine!!.run()
+        val result = withContext(CoroutineName("ScrapEngine")) {
+            engine!!.run()
+        }
 
         return result
     }

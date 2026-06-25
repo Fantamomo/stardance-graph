@@ -68,7 +68,7 @@ class ScrapEngine {
     private var uniqueProjectFollowers = 0
     private var uniqueDevlogs = 0
 
-    suspend fun run(): Result = withContext(CoroutineName("ScrapEngine")) {
+    suspend fun run(): Result = supervisorScope {
         launch(CoroutineName("DatabaseWriter")) {
             // starting the database writer
             databaseWriter.start()
@@ -95,7 +95,6 @@ class ScrapEngine {
             if (i <= INIT_PROJECTS_SCRAP) {
                 val project = Scrapable.Project(i)
                 sendToScrapUnique(project)
-
             }
             if (i <= INIT_USERS_SCRAP) {
                 val user = Scrapable.UserId(i)
@@ -105,7 +104,9 @@ class ScrapEngine {
 
         waitForStop()
 
-        return@withContext Result(
+        logger.info("Finished scraping")
+
+        return@supervisorScope Result(
             totalFound = totalFound,
             foundUsers = foundUsers,
             foundUserFollowers = foundUserFollowers,
@@ -246,26 +247,28 @@ class ScrapEngine {
     @Suppress("DuplicatedCode")
     private fun updateStatsFound(scrapable: Scrapable) {
         totalFound++
-        when (scrapable) {
+        when (scrapable.unwrap()) { // there should never be a Scrapable.WrappedScrapable here, but just in case
             is Scrapable.User, is Scrapable.PagedUser, is Scrapable.UserId -> foundUsers++
             is Scrapable.UserFollowers -> foundUserFollowers++
             is Scrapable.UserFollowing -> foundUserFollowing++
             is Scrapable.Project -> foundProjects++
             is Scrapable.ProjectFollowers -> foundProjectFollowers++
             is Scrapable.Devlog -> foundDevlogs++
+            is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
 
     @Suppress("DuplicatedCode")
     private fun updateStatsUnique(scrapable: Scrapable) {
         totalUnique++
-        when (scrapable) {
+        when (scrapable.unwrap()) { // there should never be a Scrapable.WrappedScrapable here, but just in case
             is Scrapable.User, is Scrapable.PagedUser, is Scrapable.UserId -> uniqueUsers++
             is Scrapable.UserFollowers -> uniqueUserFollowers++
             is Scrapable.UserFollowing -> uniqueUserFollowing++
             is Scrapable.Project -> uniqueProjects++
             is Scrapable.ProjectFollowers -> uniqueProjectFollowers++
             is Scrapable.Devlog -> uniqueDevlogs++
+            is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
 
