@@ -8,6 +8,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.selects.select
 import org.jetbrains.exposed.v1.r2dbc.*
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.atomics.AtomicBoolean
@@ -27,6 +28,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
     private val databaseRequestsInternal = AtomicInt(0)
     private val shouldStop = AtomicBoolean(false)
+    private val shouldStopDeferred = CompletableDeferred<Unit>()
 
     val databaseRequests: Int
         get() = databaseRequestsInternal.load()
@@ -52,6 +54,16 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
         while (isActive && !channel.isClosedForReceive) {
             val elements = mutableListOf<ScrapedObject>()
+            select {
+                channel.onReceive {
+                    elements.add(it)
+                }
+                shouldStopDeferred.onAwait {}
+            }
+            if (elements.isEmpty() && shouldStop.load()) {
+                finished.complete(Unit)
+                return@coroutineScope
+            }
             elements.add(channel.receive())
             engine.databaseChannelSize.decrementAndFetch()
             while (isActive && !channel.isClosedForReceive) {
@@ -85,6 +97,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
     suspend fun stopSignal() {
         shouldStop.store(true)
+        shouldStopDeferred.complete(Unit)
     }
 
     private suspend fun CoroutineScope.saveToDb(elements: List<ScrapedObject>) {
@@ -92,7 +105,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         savingJob = launch {
 //            logger.info("Saving ${elements.size} elements to database")
 //            val duration = measureTime {
-                saveToDatabase(elements)
+            saveToDatabase(elements)
 //            }
 //            logger.info("Saved ${elements.size} elements to database in ${duration.inWholeMilliseconds}ms")
         }
