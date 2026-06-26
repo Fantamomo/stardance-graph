@@ -112,6 +112,17 @@ object ProjectParser {
 
         val superstar = panel.selectFirst(".project-show__badge--fire") != null
 
+        val missionElement = panel.selectFirst(".mission-panel")
+        val missionData = if (missionElement != null) {
+            val isMissionShipped = missionElement.hasClass("mission-panel--shipped")
+            val mission = missionElement.selectFirst(".mission-panel__title")?.text()
+            if (mission == null) {
+                logger.warn("Failed to find mission name in $url")
+                return null
+            }
+            mission to isMissionShipped
+        } else null
+
         val postContainer = html.selectFirst(".project-show__feed")
         val posts = postContainer?.select("> article")?.mapNotNull { PostParser.parse(it, url) } ?: emptyList()
 
@@ -128,6 +139,8 @@ object ProjectParser {
             devlogCount = devlogCount ?: 0,
             hourCount = hourCount ?: 0,
             isHardware = isHardware,
+            attachedMission = missionData?.first,
+            missionShipped = missionData?.second,
             posts = posts
         )
     }

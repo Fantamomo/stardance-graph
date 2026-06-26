@@ -17,6 +17,8 @@ object ProjectTable : Table("projects") {
     val totalHours = integer("total_hours").nullable()
     val postCount = integer("post_count").nullable()
     val isHardware = bool("is_hardware").nullable()
+    val attachedMission = varchar("attached_mission", 30).nullable()
+    val missionShipped = bool("mission_shipped").nullable() // true = the project has been shipped which this mission, false = the project is still in development
 
     val firstSeen = reference("first_seen", RequestTable.id)
     val lastRequested = reference("last_requested", RequestTable.id)
