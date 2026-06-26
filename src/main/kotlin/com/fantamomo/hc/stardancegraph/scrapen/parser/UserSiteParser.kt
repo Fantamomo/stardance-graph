@@ -145,6 +145,7 @@ object UserSiteParser {
             name = usernameText,
             avatarUrl = avatarUrl.toString(),
             internalId = internalId,
+            joinedDate = joinedDate,
             bio = bioText ?: "",
             devlogCount = devlogCount ?: 0,
             projectsCount = projectCount ?: 0,

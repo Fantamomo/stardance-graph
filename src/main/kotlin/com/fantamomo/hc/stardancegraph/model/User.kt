@@ -1,5 +1,7 @@
 package com.fantamomo.hc.stardancegraph.model
 
+import kotlinx.datetime.LocalDate
+
 sealed interface User : Sendable {
     val name: String
     val avatarUrl: String
@@ -48,6 +50,7 @@ sealed interface User : Sendable {
         override val name: String,
         override val avatarUrl: String,
         val internalId: Int?,
+        val joinedDate: LocalDate,
         val bio: String,
         val devlogCount: Int,
         val projectsCount: Int,

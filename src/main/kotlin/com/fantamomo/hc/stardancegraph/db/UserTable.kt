@@ -1,6 +1,7 @@
 package com.fantamomo.hc.stardancegraph.db
 
 import org.jetbrains.exposed.v1.core.Table
+import org.jetbrains.exposed.v1.datetime.date
 
 object UserTable : Table("users") {
     val name = varchar("name", 50) // the maximum length is 30 in app/models/user.rb, but legacy names could have been longer, so we use maximum length of 50 here
@@ -11,6 +12,7 @@ object UserTable : Table("users") {
     // the id in the stardance database, if we are able to retrieve it
     val internalId = integer("internal_id").nullable()
 
+    val joinData = date("join_data").nullable()
     val bio = varchar("bio", 1_000).nullable()
     val slackId = varchar("slack_id", 15).nullable()
     val devlogCount = integer("devlog_count").nullable()
