@@ -20,7 +20,8 @@ sealed interface User : Sendable {
 
     data class FoundUser(
         override val name: String,
-        override val avatarUrl: String
+        override val avatarUrl: String,
+        // val streak: Int? // i am not completly sure if at every place a user is shown, the streak is also available, so just to be sure we only add it to the scraped user
     ) : User {
         init {
             if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
@@ -31,7 +32,7 @@ sealed interface User : Sendable {
         val original: ScrapedUser,
         val page: Int,
         val posts: List<Post>,
-        val hasMorePages: Boolean,
+        val hasMorePages: Boolean
     ) : User by original {
         override fun getScrapable(): Set<Scrapable> {
             val result = mutableSetOf<Scrapable>()
@@ -58,6 +59,7 @@ sealed interface User : Sendable {
         val votesCount: Int,
         val followerCount: Int,
         val followingCount: Int,
+        val streak: Int?,
         val achievements: List<String>,
         val posts: List<Post>,
         val hasMorePages: Boolean,
