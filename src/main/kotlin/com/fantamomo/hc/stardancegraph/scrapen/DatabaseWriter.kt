@@ -507,6 +507,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             if (element.shipNumber != null) {
                 it[ShipEventTable.shipNumber] = element.shipNumber
             }
+            it[ShipEventTable.pending] = element.pending
             it[ShipEventTable.returned] = element.returned
             it[ShipEventTable.createdAt] = element.createdAt
             it[ShipEventTable.demoUrl] = element.demoUrl.toString()
