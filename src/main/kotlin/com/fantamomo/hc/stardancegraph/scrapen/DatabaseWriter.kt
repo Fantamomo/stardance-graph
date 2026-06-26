@@ -331,6 +331,9 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ProjectTable.postCount] = element.posts.size
             it[ProjectTable.isHardware] = element.isHardware
 
+            it[ProjectTable.attachedMission] = element.attachedMission
+            it[ProjectTable.missionShipped] = element.missionShipped
+
             it[ProjectTable.firstSeen] = requestId
             it[ProjectTable.lastRequested] = requestId
         }
