@@ -180,7 +180,7 @@ object DevlogParser {
         }
 
         val commentsContainer = originalHtml.getElementById("comments")
-        val comments: List<Comment>
+        val comments: List<Comment>?
         if (commentsContainer != null && commentsContainer.classNames().contains("devlog-detail__comments")) {
             val commentsList = commentsContainer.select(".devlog-detail__comments-list")
             val result = mutableListOf<Comment>()
@@ -252,7 +252,7 @@ object DevlogParser {
             }
             comments = result
         } else {
-            comments = emptyList()
+            comments = null
         }
 
         return Devlog(
