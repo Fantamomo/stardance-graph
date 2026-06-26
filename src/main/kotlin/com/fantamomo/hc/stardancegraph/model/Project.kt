@@ -23,6 +23,8 @@ sealed interface Project : Sendable {
         val devlogCount: Int,
         val hourCount: Int,
         val isHardware: Boolean,
+        val attachedMission: String?,
+        val missionShipped: Boolean?,
         val posts: List<Post>
     ) : Project {
         override fun getScrapable(): Set<Scrapable> {
