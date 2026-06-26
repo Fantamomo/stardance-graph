@@ -57,6 +57,14 @@ object UserSiteParser {
             return null
         }
 
+        val streakElement = usernameElement.selectFirst(".streak-badge")
+        val streakText = streakElement?.attr("data-tooltip-message-value")?.ifBlank { null }
+        val streak = streakText?.takeWhile { it.isDigit() }?.toIntOrNull()
+
+        if (streakText != null && streak == null) {
+            logger.warn("Failed to parse streak '$streakText' to streak in ${profileSection.cssSelector()} from $url")
+        }
+
         val internalId = main.selectFirst(".profile")?.attr("action")?.removePrefix("/users/")?.toIntOrNull()
         if (internalId == null) {
             logger.warn("Failed to find internal ID in $url")
@@ -153,6 +161,7 @@ object UserSiteParser {
             votesCount = votesCount ?: 0,
             followerCount = followerCount ?: 0,
             followingCount = followingCount ?: 0,
+            streak = streak,
             achievements = achievements,
             posts = posts,
             hasMorePages = hasMorePages,
