@@ -207,7 +207,13 @@ object PostParser {
             return null
         }
 
-        val hasBeenReturned = html.selectFirst(".project-show__latest-ship-status--returned") != null
+        val shipStatusElement = html.selectFirst(".project-show__latest-ship-status")
+        val isPendingReview = shipStatusElement?.hasClass("project-show__latest-ship-status--pending") == true
+        val hasBeenReturned = shipStatusElement?.hasClass("project-show__latest-ship-status--returned") == true
+
+        if (shipStatusElement != null && (!isPendingReview && !hasBeenReturned)) {
+            logger.warn("Unexpected ship status '${shipStatusElement.text()}' in ${shipStatusElement.cssSelector()} from $url")
+        }
 
         val createdAtElement = html.selectFirst(".feed-post-card__time")
         if (createdAtElement == null) {
@@ -285,6 +291,7 @@ object PostParser {
                 name = author,
                 avatarUrl = avatarUrl
             ),
+            pending = isPendingReview,
             returned = hasBeenReturned,
             createdAt = createdAt,
             internalId = internalId,
