@@ -9,6 +9,7 @@ data class ShipEvent(
     override val createdAt: Instant,
     val internalId: Int,
     val shipNumber: Int?,
+    val returned: Boolean,
     val body: String,
     val demoUrl: Url,
     val repoUrl: Url,

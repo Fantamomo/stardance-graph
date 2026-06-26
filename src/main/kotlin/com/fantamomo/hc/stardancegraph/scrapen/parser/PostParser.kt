@@ -207,6 +207,8 @@ object PostParser {
             return null
         }
 
+        val hasBeenReturned = html.selectFirst(".project-show__latest-ship-status--returned") != null
+
         val createdAtElement = html.selectFirst(".feed-post-card__time")
         if (createdAtElement == null) {
             logger.warn("Failed to find created at element in ${html.cssSelector()} from $url")
@@ -283,6 +285,7 @@ object PostParser {
                 name = author,
                 avatarUrl = avatarUrl
             ),
+            returned = hasBeenReturned,
             createdAt = createdAt,
             internalId = internalId,
             shipNumber = shipNumber,
