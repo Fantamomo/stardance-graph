@@ -431,6 +431,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             if (element.internalId != null) it[UserTable.internalId] = element.internalId
             it[UserTable.verified] = true
 
+            it[UserTable.joinData] = element.joinedDate
             it[UserTable.bio] = element.bio
             it[UserTable.slackId] = cachedLinkToSlack(element.avatarUrl)
             it[UserTable.devlogCount] = element.devlogCount
