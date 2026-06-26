@@ -1,0 +1,1 @@
+ALTER TABLE users ADD join_data DATE NULL;
