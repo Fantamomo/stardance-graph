@@ -1,0 +1,1 @@
+ALTER TABLE ship_events ADD returned BOOLEAN DEFAULT FALSE NOT NULL;
