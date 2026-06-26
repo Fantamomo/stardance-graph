@@ -444,6 +444,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[UserTable.achievementsCount] = element.achievements.size
             it[UserTable.followerCount] = element.followerCount
             it[UserTable.followingCount] = element.followingCount
+            it[UserTable.streak] = element.streak
             it[UserTable.pages] = 1
 
             it[UserTable.firstSeen] = requestId
