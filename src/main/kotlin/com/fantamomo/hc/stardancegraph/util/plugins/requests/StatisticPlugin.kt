@@ -1,4 +1,4 @@
-package com.fantamomo.hc.stardancegraph.util.statistics.requests
+package com.fantamomo.hc.stardancegraph.util.plugins.requests
 
 import io.ktor.client.plugins.api.*
 import io.ktor.client.request.*

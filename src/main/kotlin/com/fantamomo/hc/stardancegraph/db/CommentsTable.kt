@@ -10,9 +10,8 @@ object CommentsTable : Table("comments") {
     val content = varchar("content", 5_000)
     val created = timestamp("created")
 
-    val firstSeen = timestamp("first_seen")
-    val lastSeen = timestamp("last_seen")
-    val lastSeenIteration = reference("last_seen_iteration", RequestIterationsTable.id)
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
 
     override val primaryKey = PrimaryKey(devlog, number)
 }

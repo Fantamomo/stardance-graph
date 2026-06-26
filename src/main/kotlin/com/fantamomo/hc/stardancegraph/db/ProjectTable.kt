@@ -1,7 +1,6 @@
 package com.fantamomo.hc.stardancegraph.db
 
 import org.jetbrains.exposed.v1.core.Table
-import org.jetbrains.exposed.v1.datetime.timestamp
 
 object ProjectTable : Table("projects") {
     val id = integer("id")
@@ -19,9 +18,8 @@ object ProjectTable : Table("projects") {
     val postCount = integer("post_count").nullable()
     val isHardware = bool("is_hardware").nullable()
 
-    val firstSeen = timestamp("first_seen")
-    val lastRequested = timestamp("last_requested").nullable()
-    val lastRequestedIteration = reference("last_requested_iteration", RequestIterationsTable.id).nullable()
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastRequested = reference("last_requested", RequestTable.id)
 
     override val primaryKey = PrimaryKey(id)
 }

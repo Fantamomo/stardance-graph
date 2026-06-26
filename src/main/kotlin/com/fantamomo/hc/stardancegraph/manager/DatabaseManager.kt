@@ -86,6 +86,7 @@ object DatabaseManager {
                     ProjectTable,
                     RepostTable,
                     RequestIterationsTable,
+                    RequestTable,
                     ShipEventTable,
                     SuperstarTable,
                     UserFollowerTable,

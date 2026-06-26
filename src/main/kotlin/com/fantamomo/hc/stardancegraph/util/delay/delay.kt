@@ -1,4 +1,4 @@
-package com.fantamomo.hc.stardancegraph.util.statistics.delay
+package com.fantamomo.hc.stardancegraph.util.delay
 
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay

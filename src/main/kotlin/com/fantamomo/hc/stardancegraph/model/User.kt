@@ -8,7 +8,8 @@ sealed interface User : Sendable {
 
     data class UnverifiedUser(
         override val name: String,
-        override val avatarUrl: String
+        override val avatarUrl: String,
+        val internalId: Int?
     ) : User {
         init {
             if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
@@ -46,6 +47,7 @@ sealed interface User : Sendable {
     data class ScrapedUser(
         override val name: String,
         override val avatarUrl: String,
+        val internalId: Int?,
         val bio: String,
         val devlogCount: Int,
         val projectsCount: Int,

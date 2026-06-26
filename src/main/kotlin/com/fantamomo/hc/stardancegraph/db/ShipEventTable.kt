@@ -15,9 +15,8 @@ object ShipEventTable : Table("ship_events") {
     val attachedMission = varchar("attached_mission", 30).nullable()
     val description = varchar("description", 4000)
 
-    val firstSeen = timestamp("first_seen")
-    val lastSeen = timestamp("last_seen").nullable()
-    val lastSeenIteration = reference("last_seen_iteration", RequestIterationsTable.id).nullable()
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
 
     override val primaryKey = PrimaryKey(internalId)
 }

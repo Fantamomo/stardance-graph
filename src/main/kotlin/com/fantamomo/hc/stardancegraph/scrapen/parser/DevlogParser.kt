@@ -1,4 +1,4 @@
-package com.fantamomo.hc.stardancegraph.scrapen.site
+package com.fantamomo.hc.stardancegraph.scrapen.parser
 
 import com.fantamomo.hc.stardancegraph.model.Comment
 import com.fantamomo.hc.stardancegraph.model.Devlog
@@ -180,7 +180,7 @@ object DevlogParser {
         }
 
         val commentsContainer = originalHtml.getElementById("comments")
-        val comments: List<Comment>
+        val comments: List<Comment>?
         if (commentsContainer != null && commentsContainer.classNames().contains("devlog-detail__comments")) {
             val commentsList = commentsContainer.select(".devlog-detail__comments-list")
             val result = mutableListOf<Comment>()
@@ -252,7 +252,7 @@ object DevlogParser {
             }
             comments = result
         } else {
-            comments = emptyList()
+            comments = null
         }
 
         return Devlog(

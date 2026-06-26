@@ -11,9 +11,8 @@ object SuperstarTable : Table("superstars") {
     val views = integer("views")
     val reposts = integer("reposts")
 
-    val firstSeen = timestamp("first_seen")
-    val lastSeen = timestamp("last_seen").nullable()
-    val lastSeenIteration = reference("last_seen_iteration", RequestIterationsTable.id).nullable()
+    val firstSeen = reference("first_seen", RequestTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
 
     override val primaryKey = PrimaryKey(internalId)
 }

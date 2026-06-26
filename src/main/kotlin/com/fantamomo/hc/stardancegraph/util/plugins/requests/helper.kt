@@ -1,4 +1,4 @@
-package com.fantamomo.hc.stardancegraph.util.statistics.requests
+package com.fantamomo.hc.stardancegraph.util.plugins.requests
 
 import kotlinx.coroutines.currentCoroutineContext
 

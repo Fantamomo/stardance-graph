@@ -2,9 +2,11 @@ package com.fantamomo.hc.stardancegraph.scrapen
 
 import com.fantamomo.hc.stardancegraph.model.Project
 import com.fantamomo.hc.stardancegraph.model.Scrapable
-import com.fantamomo.hc.stardancegraph.model.Sendable
+import com.fantamomo.hc.stardancegraph.model.ScrapedObject
+import com.fantamomo.hc.stardancegraph.model.User
 import com.fantamomo.hc.stardancegraph.scrapen.data.SiteStats
 import io.ktor.http.*
+import io.ktor.util.collections.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import org.slf4j.LoggerFactory
@@ -16,18 +18,22 @@ import kotlin.time.measureTime
 class ScrapEngine {
     // elements that are sent to the database so that they can be written to the database
     // SENDER: progress, RECEIVER: databaseWriter
-    val databaseChannel = Channel<Sendable>(Channel.UNLIMITED)
+    val databaseChannel = Channel<ScrapedObject>(Channel.UNLIMITED)
+    val databaseChannelSize = AtomicInt(0)
 
     // elements that are found on the site and should be processed
     // SENDER: siteScraper, RECEIVER: progress
-    val foundChannel = Channel<Sendable>(Channel.RENDEZVOUS)
+    val foundChannel = Channel<ScrapedObject>(Channel.RENDEZVOUS)
 
     // elements that are to be scraped
     // SENDER: progress, RECEIVER: siteScraper
     val toScrapeChannel = Channel<Scrapable>(Channel.UNLIMITED)
 
     // links that have already been scraped, so that we don't scrape them again
-    val scrapedLinks: MutableSet<Url> = mutableSetOf()
+    val scrapedLinks: MutableSet<Url> = ConcurrentSet()
+
+    // only contains usernames and user ids
+    internal val scrapedUsers: MutableSet<Any> = ConcurrentSet()
 
     val databaseWriter = DatabaseWriter(this, databaseChannel)
     val siteScraper = SiteScraper(this, scraped = foundChannel, toScrap = toScrapeChannel)
@@ -42,7 +48,7 @@ class ScrapEngine {
         private set
     internal var biggestSuccessfullyScrapedProjectId = 0
         private set
-    internal var project404ErrorCount = 0
+    internal val project404ErrorCount = AtomicInt(0)
 
     private val stopping: CompletableDeferred<Unit> = CompletableDeferred()
 
@@ -62,36 +68,45 @@ class ScrapEngine {
     private var uniqueProjectFollowers = 0
     private var uniqueDevlogs = 0
 
-    suspend fun run(): Result = coroutineScope {
-        launch {
+    suspend fun run(): Result = supervisorScope {
+        launch(CoroutineName("DatabaseWriter")) {
             // starting the database writer
             databaseWriter.start()
         }
-        launch {
+        launch(CoroutineName("ScrapProgress")) {
             // starting the mapper which reads from foundChannel(siteScraper) and writes to databaseWriter and toScapeChannel
             progress()
         }
-        launch {
+        launch(CoroutineName("SiteScraper")) {
             // starting the site scraper
             siteScraper.start()
         }
 
         // the database writer needs to be ready before we start scraping
         databaseWriter.waitForReady()
+        logger.info("DatabaseWriter is ready")
+
+
+        logger.info("Starting scraping")
+        biggestProjectId = INIT_PROJECTS_SCRAP
 
         // starting the monster
-        currentWork.incrementAndFetch()
-        biggestProjectId = 20000
-        for (i in 1..20000) {
-            val project = Scrapable.Project(i)
-            if (scrapedLinks.add(project.url)) {
-                toScrapeChannel.send(project)
+        for (i in 1..maxOf(INIT_PROJECTS_SCRAP, INIT_USERS_SCRAP)) {
+            if (i <= INIT_PROJECTS_SCRAP) {
+                val project = Scrapable.Project(i)
+                sendToScrapUnique(project)
+            }
+            if (i <= INIT_USERS_SCRAP) {
+                val user = Scrapable.UserId(i)
+                sendToScrapUnique(user)
             }
         }
 
         waitForStop()
 
-        return@coroutineScope Result(
+        logger.info("Finished scraping")
+
+        return@supervisorScope Result(
             totalFound = totalFound,
             foundUsers = foundUsers,
             foundUserFollowers = foundUserFollowers,
@@ -127,31 +142,42 @@ class ScrapEngine {
         var sendLimitError = false
         for (element in foundChannel) {
             databaseChannel.send(element)
+            databaseChannelSize.incrementAndFetch()
 
-            if (element is Project.ScrapedProject) {
-                biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, element.id)
+            val sendable = element.sendable
+            if (sendable != null) {
+                if (sendable is Project.ScrapedProject) {
+                    biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, sendable.id)
 //                logger.info("biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId")
-                project404ErrorCount = 0
-            }
+                    project404ErrorCount.store(0)
+                }
 
-            val scrapable = element.getScrapable()
-            if (scrapable.isNotEmpty()) {
-                for (link in scrapable) {
-                    if (link is Scrapable.Project) {
-                        biggestProjectId = maxOf(biggestProjectId, link.id)
-                    }
+                if (sendable is User.ScrapedUser) {
+                    scrapedUsers.add(sendable.name)
+                    sendable.internalId?.let { scrapedUsers.add(it) }
+                } else if (sendable is User.UnverifiedUser) {
+                    scrapedUsers.add(sendable.name)
+                    sendable.internalId?.let { scrapedUsers.add(it) }
+                }
 
-                    updateStatsFound(link)
+                val scrapable = sendable.getScrapable()
+                if (scrapable.isNotEmpty()) {
+                    for (link in scrapable) {
+                        if (link is Scrapable.Project) {
+                            biggestProjectId = maxOf(biggestProjectId, link.id)
+                        }
 
-                    if (scrapedLinks.add(link.url)) {
-                        updateStatsUnique(link)
-                        sendToToScrape++
-                        if (sendToToScrape <= LIMIT_SCRAPES) {
-                            currentWork.incrementAndFetch()
-                            toScrapeChannel.send(link)
-                        } else if (!sendLimitError) {
-                            logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
-                            sendLimitError = true
+                        updateStatsFound(link)
+
+                        if (scrapedLinks.add(link.url)) {
+                            updateStatsUnique(link)
+                            sendToToScrape++
+                            if (sendToToScrape <= LIMIT_SCRAPES) {
+                                sendtoScrapWithUserCheck(link)
+                            } else if (!sendLimitError) {
+                                logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
+                                sendLimitError = true
+                            }
                         }
                     }
                 }
@@ -160,25 +186,26 @@ class ScrapEngine {
             if (currentWork.decrementAndFetch() <= 0) {
 //                logger.info("currentWork = 0, biggestProjectId = $biggestProjectId, biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId, project404ErrorCount = $project404ErrorCount")
                 var success = false
-                if (project404ErrorCount <= 100) {
+                val currentProject404ErrorCount = project404ErrorCount.load()
+                if (currentProject404ErrorCount <= 100) {
                     for (i in 1..20) {
                         val nextProjectId = maxOf(biggestProjectId, biggestSuccessfullyScrapedProjectId) + 1
                         val project = Scrapable.Project(nextProjectId)
                         biggestProjectId = nextProjectId
                         if (scrapedLinks.add(project.url)) {
-                            currentWork.incrementAndFetch()
-                            toScrapeChannel.send(project)
+                            sendToScrap(project)
                             success = true
                             break
                         }
                     }
                     if (!success) {
-                        logger.warn("Could not find new project to scrape")
-                        project404ErrorCount = Int.MAX_VALUE
+                        if (project404ErrorCount.compareAndSet(currentProject404ErrorCount, Int.MAX_VALUE)) {
+                            logger.warn("Could not find new project to scrape")
+                        } // else { if we fail to set the value, it was set by another thread, and hopefully we can now find a new project to scrape }
                     }
                 }
                 success
-                if (project404ErrorCount > 100) {
+                if (project404ErrorCount.load() > 100) {
                     logger.info("No more work, stopping")
                     try {
                         foundChannel.close()
@@ -197,29 +224,51 @@ class ScrapEngine {
         }
     }
 
+    private suspend fun sendToScrapUnique(element: Scrapable) {
+        if (scrapedLinks.add(element.url)) {
+            sendtoScrapWithUserCheck(element)
+        }
+    }
+
+    private suspend fun sendtoScrapWithUserCheck(element: Scrapable) {
+        when (element) {
+            is Scrapable.User -> if (scrapedUsers.contains(element.name)) return
+            is Scrapable.UserId -> if (scrapedUsers.contains(element.id)) return
+            else -> {}
+        }
+        sendToScrap(element)
+    }
+
+    private suspend fun sendToScrap(element: Scrapable) {
+        currentWork.incrementAndFetch()
+        toScrapeChannel.send(element)
+    }
+
     @Suppress("DuplicatedCode")
     private fun updateStatsFound(scrapable: Scrapable) {
         totalFound++
-        when (scrapable) {
-            is Scrapable.User, is Scrapable.PagedUser -> foundUsers++
+        when (scrapable.unwrap()) { // there should never be a Scrapable.WrappedScrapable here, but just in case
+            is Scrapable.User, is Scrapable.PagedUser, is Scrapable.UserId -> foundUsers++
             is Scrapable.UserFollowers -> foundUserFollowers++
             is Scrapable.UserFollowing -> foundUserFollowing++
             is Scrapable.Project -> foundProjects++
             is Scrapable.ProjectFollowers -> foundProjectFollowers++
             is Scrapable.Devlog -> foundDevlogs++
+            is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
 
     @Suppress("DuplicatedCode")
     private fun updateStatsUnique(scrapable: Scrapable) {
         totalUnique++
-        when (scrapable) {
-            is Scrapable.User, is Scrapable.PagedUser -> uniqueUsers++
+        when (scrapable.unwrap()) { // there should never be a Scrapable.WrappedScrapable here, but just in case
+            is Scrapable.User, is Scrapable.PagedUser, is Scrapable.UserId -> uniqueUsers++
             is Scrapable.UserFollowers -> uniqueUserFollowers++
             is Scrapable.UserFollowing -> uniqueUserFollowing++
             is Scrapable.Project -> uniqueProjects++
             is Scrapable.ProjectFollowers -> uniqueProjectFollowers++
             is Scrapable.Devlog -> uniqueDevlogs++
+            is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
 
@@ -245,5 +294,7 @@ class ScrapEngine {
 
         // testing only: limits the scrap-engine to a specific number of scrapes
         private const val LIMIT_SCRAPES = Int.MAX_VALUE / 2
+        private const val INIT_PROJECTS_SCRAP = 20000
+        private const val INIT_USERS_SCRAP = 35300
     }
 }
