@@ -22,6 +22,7 @@ object UserTable : Table("users") {
     val achievementsCount = integer("achievements_count").nullable()
     val followerCount = integer("follower_count").nullable()
     val followingCount = integer("following_count").nullable()
+    val streak = integer("streak").nullable()
     val pages = integer("pages").nullable()
 
     val firstSeen = reference("first_seen", RequestTable.id)
