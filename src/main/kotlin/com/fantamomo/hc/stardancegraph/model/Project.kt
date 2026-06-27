@@ -1,5 +1,7 @@
 package com.fantamomo.hc.stardancegraph.model
 
+import io.ktor.http.*
+
 sealed interface Project : Sendable {
     val id: Int
     val owner: User
@@ -19,6 +21,7 @@ sealed interface Project : Sendable {
         val title: String,
         val description: String?,
         val superstar: Boolean,
+        val sourceUrl: Url?,
         val followerCount: Int,
         val devlogCount: Int,
         val hourCount: Int,

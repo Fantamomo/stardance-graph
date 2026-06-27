@@ -324,6 +324,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ProjectTable.title] = element.title
             it[ProjectTable.description] = element.description
             it[ProjectTable.superstar] = element.superstar
+            it[ProjectTable.sourceUrl] = element.sourceUrl?.toString()
 
             it[ProjectTable.followerCount] = element.followerCount
             it[ProjectTable.devlogCount] = element.devlogCount
