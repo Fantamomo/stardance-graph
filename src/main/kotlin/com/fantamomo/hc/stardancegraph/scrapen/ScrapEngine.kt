@@ -1,18 +1,27 @@
 package com.fantamomo.hc.stardancegraph.scrapen
 
+import com.fantamomo.hc.stardancegraph.db.RngTable
+import com.fantamomo.hc.stardancegraph.manager.DatabaseManager
 import com.fantamomo.hc.stardancegraph.model.Project
 import com.fantamomo.hc.stardancegraph.model.Scrapable
 import com.fantamomo.hc.stardancegraph.model.ScrapedObject
 import com.fantamomo.hc.stardancegraph.model.User
 import com.fantamomo.hc.stardancegraph.scrapen.data.SiteStats
+import com.fantamomo.hc.stardancegraph.util.daysUntilSequence
 import io.ktor.http.*
 import io.ktor.util.collections.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.toList
+import kotlinx.datetime.*
+import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.r2dbc.select
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.concurrent.atomics.incrementAndFetch
+import kotlin.time.Clock
 import kotlin.time.measureTime
 
 class ScrapEngine {
@@ -91,16 +100,7 @@ class ScrapEngine {
         biggestProjectId = INIT_PROJECTS_SCRAP
 
         // starting the monster
-        for (i in 1..maxOf(INIT_PROJECTS_SCRAP, INIT_USERS_SCRAP)) {
-            if (i <= INIT_PROJECTS_SCRAP) {
-                val project = Scrapable.Project(i)
-                sendToScrapUnique(project)
-            }
-            if (i <= INIT_USERS_SCRAP) {
-                val user = Scrapable.UserId(i)
-                sendToScrapUnique(user)
-            }
-        }
+        start()
 
         waitForStop()
 
@@ -122,6 +122,54 @@ class ScrapEngine {
             uniqueProjectFollowers = uniqueProjectFollowers,
             uniqueDevlogs = uniqueDevlogs
         )
+    }
+
+    private suspend fun start() {
+        val dates = try {
+            DatabaseManager.transaction {
+                RngTable.select(RngTable.date)
+                    .withDistinct(true)
+                    .orderBy(RngTable.date, SortOrder.DESC)
+                    .limit(2)
+                    .map { it[RngTable.date] }
+                    .toList()
+            }
+        } catch (e: Exception) {
+            logger.error("Failed to get last RNG date", e)
+            emptyList()
+        }
+
+        val rngLaunchDate = LocalDate(2026, 6, 15) // from https://github.com/Fantamomo/stardance/blob/dd6a05b73c3796ecd18a80255fb1be68dfd053a7/app/models/daily_roll.rb#L34
+        val currentDate = Clock.System.now().toLocalDateTime(TimeZone.UTC).date
+
+        val fromRngScrapDate = when {
+            dates.isEmpty() -> rngLaunchDate
+            dates.first() == currentDate -> currentDate
+            else -> dates.first() + DatePeriod(days = 1)
+        }
+
+        val rngDates = fromRngScrapDate.daysUntilSequence(currentDate).iterator()
+
+        val maxIterations = listOf(
+            INIT_PROJECTS_SCRAP,
+            INIT_USERS_SCRAP,
+            fromRngScrapDate.daysUntil(currentDate)
+        ).max()
+
+        for (i in 1..maxIterations) {
+            if (i <= INIT_PROJECTS_SCRAP) {
+                val project = Scrapable.Project(i)
+                sendToScrapUnique(project)
+            }
+            if (i <= INIT_USERS_SCRAP) {
+                val user = Scrapable.UserId(i)
+                sendToScrapUnique(user)
+            }
+            if (rngDates.hasNext()) {
+                val rngPage = Scrapable.RngPage(rngDates.next())
+                sendToScrapUnique(rngPage)
+            }
+        }
     }
 
     private suspend fun CoroutineScope.waitForStop() {
@@ -254,6 +302,7 @@ class ScrapEngine {
             is Scrapable.Project -> foundProjects++
             is Scrapable.ProjectFollowers -> foundProjectFollowers++
             is Scrapable.Devlog -> foundDevlogs++
+            is Scrapable.RngPage -> {} // ignore
             is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
@@ -268,6 +317,7 @@ class ScrapEngine {
             is Scrapable.Project -> uniqueProjects++
             is Scrapable.ProjectFollowers -> uniqueProjectFollowers++
             is Scrapable.Devlog -> uniqueDevlogs++
+            is Scrapable.RngPage -> {} // ignore
             is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
