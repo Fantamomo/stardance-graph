@@ -2,6 +2,7 @@ package com.fantamomo.hc.stardancegraph.model
 
 import com.fantamomo.hc.stardancegraph.model.User.ScrapedUser
 import io.ktor.http.*
+import kotlinx.datetime.LocalDate
 
 sealed interface Scrapable {
     val url: Url
@@ -66,6 +67,13 @@ sealed interface Scrapable {
         val owner: com.fantamomo.hc.stardancegraph.model.User, // yeah, i also dont like this, but it does not work without it
     ) : Scrapable {
         override val url: Url = Url("https://stardance.hackclub.com/projects/$id/followers")
+    }
+
+    data class RngPage(
+        val date: LocalDate,
+        val page: Int = 1,
+    ) : Scrapable {
+        override val url: Url = Url("https://stardance.hackclub.com/rng?date=$date&page=$page")
     }
 
     data class WrappedScrapable<D>(val scrapable: Scrapable, val data: D) : Scrapable {
