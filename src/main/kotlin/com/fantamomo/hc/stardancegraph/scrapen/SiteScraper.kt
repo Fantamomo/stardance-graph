@@ -4,10 +4,7 @@ import com.fantamomo.hc.stardancegraph.data.SharedValues
 import com.fantamomo.hc.stardancegraph.model.Scrapable
 import com.fantamomo.hc.stardancegraph.model.ScrapedObject
 import com.fantamomo.hc.stardancegraph.model.Sendable
-import com.fantamomo.hc.stardancegraph.scrapen.parser.DevlogParser
-import com.fantamomo.hc.stardancegraph.scrapen.parser.FollowParser
-import com.fantamomo.hc.stardancegraph.scrapen.parser.ProjectParser
-import com.fantamomo.hc.stardancegraph.scrapen.parser.UserSiteParser
+import com.fantamomo.hc.stardancegraph.scrapen.parser.*
 import com.fantamomo.hc.stardancegraph.util.RateLimiter
 import com.fantamomo.hc.stardancegraph.util.ServerLoadController
 import com.fantamomo.hc.stardancegraph.util.delay.waitingDelay
@@ -83,13 +80,13 @@ class SiteScraper(
                     } catch (_: Throwable) {
                         // ignore
                     }
-                    progress(scraperId)
+                    progressSite(scraperId)
                 }
             }
         }
     }
 
-    private suspend fun progress(scraperId: Int) {
+    private suspend fun progressSite(scraperId: Int) {
         var localRequests = 0
         var dbOverloaded = false
         while (true) {
@@ -134,7 +131,7 @@ class SiteScraper(
             withContext(CoroutineName("Scraper$$scraperId-$number")) {
                 logger.info("Scraping ${element.url}")
 
-                val scrapedObject = scrape(element, scraperId)
+                val scrapedObject = scrapeSite(element, scraperId)
 
                 scraped.send(scrapedObject)
             }
@@ -170,7 +167,7 @@ class SiteScraper(
         }
     }
 
-    private suspend fun scrape(toScrap: Scrapable, scraperId: Int): ScrapedObject {
+    private suspend fun scrapeSite(toScrap: Scrapable, scraperId: Int): ScrapedObject {
         val element = toScrap.unwrap()
 
         val scrapedObject = ScrapedObject.Builder()
@@ -289,6 +286,7 @@ class SiteScraper(
 
                 is Scrapable.UserFollowers -> FollowParser.parseUserFollowers(html, element.url, element.user)
                 is Scrapable.UserFollowing -> FollowParser.parseUserFollowing(html, element.url, element.user)
+                is Scrapable.RngPage -> RngParser.parse(html, element.url, element.page, element.date)
                 is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $element") // should never happen
             }
         } catch (e: Exception) {
