@@ -1,5 +1,6 @@
 package com.fantamomo.hc.stardancegraph.model
 
+import io.ktor.http.*
 import kotlinx.datetime.LocalDate
 
 sealed interface User : Sendable {
@@ -50,6 +51,7 @@ sealed interface User : Sendable {
     data class ScrapedUser(
         override val name: String,
         override val avatarUrl: String,
+        val bannerUrl: Url?,
         val internalId: Int?,
         val joinedDate: LocalDate,
         val bio: String,
