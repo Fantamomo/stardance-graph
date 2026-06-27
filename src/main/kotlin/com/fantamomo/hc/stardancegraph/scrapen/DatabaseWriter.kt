@@ -323,6 +323,14 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ProjectTable.owner] = element.owner.name
             it[ProjectTable.title] = element.title
             it[ProjectTable.description] = element.description
+
+            val bannerUrlString = element.bannerUrl?.toString()
+            if ((bannerUrlString?.length ?: 0) <= 300) {
+                it[ProjectTable.bannerImage] = bannerUrlString
+            } else {
+                logger.warn("Banner URL of project ${element.id} is too long: ${element.bannerUrl}")
+            }
+
             it[ProjectTable.superstar] = element.superstar
             it[ProjectTable.sourceUrl] = element.sourceUrl?.toString()
 
@@ -432,6 +440,14 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         ) {
             it[UserTable.name] = element.name
             it[UserTable.avatarUrl] = element.avatarUrl
+
+            val bannerUrlString = element.bannerUrl?.toString()
+            if ((bannerUrlString?.length ?: 0) <= 300) {
+                it[UserTable.bannerUrl] = bannerUrlString
+            } else {
+                logger.warn("Banner URL of user @${element.name} is too long: ${element.bannerUrl}")
+            }
+
             if (element.internalId != null) it[UserTable.internalId] = element.internalId
             it[UserTable.verified] = true
 

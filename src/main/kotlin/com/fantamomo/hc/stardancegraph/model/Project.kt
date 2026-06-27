@@ -20,6 +20,7 @@ sealed interface Project : Sendable {
         override val owner: User,
         val title: String,
         val description: String?,
+        val bannerUrl: Url?,
         val superstar: Boolean,
         val sourceUrl: Url?,
         val followerCount: Int,

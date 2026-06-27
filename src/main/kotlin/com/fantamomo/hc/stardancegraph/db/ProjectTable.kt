@@ -10,6 +10,7 @@ object ProjectTable : Table("projects") {
     // from app/models/project.rb
     val title = varchar("title", 120).nullable()
     val description = varchar("description", 1_000).nullable()
+    val bannerImage = varchar("banner_image", 300).nullable()
     val superstar = bool("superstar").nullable()
     val sourceUrl = varchar("source_url", 255).nullable()
 

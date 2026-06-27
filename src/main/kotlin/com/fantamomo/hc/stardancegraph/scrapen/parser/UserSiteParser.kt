@@ -46,6 +46,11 @@ object UserSiteParser {
             return null
         }
 
+        val bannerUrlElement = main.selectFirst(".profile__banner-image")
+        val bannerUrlText = bannerUrlElement?.attr("src")
+        val bannerUrl = if (bannerUrlText != null) parseUrl(bannerUrlText) else null
+        if (bannerUrlElement != null && bannerUrl == null) logger.warn("Failed to parse banner URL in ${bannerUrlElement.cssSelector()} from $url")
+
         val usernameElement = profileSection.selectFirst(".profile__handle")
         if (usernameElement == null) {
             logger.warn("Failed to find username element in $url")
@@ -152,6 +157,7 @@ object UserSiteParser {
         return User.ScrapedUser(
             name = usernameText,
             avatarUrl = avatarUrl.toString(),
+            bannerUrl = bannerUrl,
             internalId = internalId,
             joinedDate = joinedDate,
             bio = bioText ?: "",
