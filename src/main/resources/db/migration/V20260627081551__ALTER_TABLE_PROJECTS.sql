@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD banner_image VARCHAR(300) NULL;

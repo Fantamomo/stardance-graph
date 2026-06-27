@@ -6,6 +6,7 @@ import org.jetbrains.exposed.v1.datetime.date
 object UserTable : Table("users") {
     val name = varchar("name", 50) // the maximum length is 30 in app/models/user.rb, but legacy names could have been longer, so we use maximum length of 50 here
     val avatarUrl = varchar("avatar_url", 255)
+    val bannerUrl = varchar("banner_url", 300).nullable()
 
     val verified = bool("verified").nullable()
 
