@@ -3,6 +3,9 @@ package com.fantamomo.hc.stardancegraph.util
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.InvocationKind
+import kotlin.contracts.contract
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
@@ -28,7 +31,9 @@ class RateLimiter(
         }
     }
 
+    @OptIn(ExperimentalContracts::class)
     suspend fun acquire(block: suspend (Duration) -> Unit) {
+        contract { callsInPlace(block, InvocationKind.AT_MOST_ONCE) }
         mutex.withLock {
             val remaining = nextAllowedTime.elapsedNow()
 
