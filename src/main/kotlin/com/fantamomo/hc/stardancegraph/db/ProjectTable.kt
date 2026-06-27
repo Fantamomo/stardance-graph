@@ -11,6 +11,7 @@ object ProjectTable : Table("projects") {
     val title = varchar("title", 120).nullable()
     val description = varchar("description", 1_000).nullable()
     val superstar = bool("superstar").nullable()
+    val sourceUrl = varchar("source_url", 255).nullable()
 
     val followerCount = integer("follower_count").nullable()
     val devlogCount = integer("devlog_count").nullable()
