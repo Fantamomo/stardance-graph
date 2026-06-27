@@ -227,6 +227,24 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             is ProjectFollowers -> insertProjectFollowers(element, requestId)
             is UserFollower -> insertUserFollowers(element, requestId)
             is UserFollowing -> insertUserFollowing(element, requestId)
+            is RngPage -> insertRngPage(element, requestId)
+        }
+    }
+
+    private suspend fun insertRngPage(element: RngPage, requestId: Int) {
+        for (follower in element.entries) insertMissingUser(follower.user, requestId)
+        RngTable.batchUpsert(
+            element.entries,
+            onUpdateExclude = listOf(RngTable.firstSeen),
+            shouldReturnGeneratedValues = false
+        ) {
+            this[RngTable.date] = element.date
+            this[RngTable.user] = it.user.name
+            this[RngTable.rank] = it.rank
+            this[RngTable.score] = it.score
+
+            this[RngTable.firstSeen] = requestId
+            this[RngTable.lastSeen] = requestId
         }
     }
 
