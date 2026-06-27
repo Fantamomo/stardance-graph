@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.withPermit
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.slf4j.LoggerFactory
+import java.net.SocketTimeoutException
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.incrementAndFetch
@@ -64,7 +65,7 @@ class SiteScraper(
     // it is prioritized over toScrap, so that
     private val failedScrapable = Channel<Scrapable.WrappedScrapable<Retry>>()
 
-    data class Retry(val retry: Int)
+    private data class Retry(val retry: Int)
 
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val scrapedCount = AtomicInt(0)
@@ -182,6 +183,9 @@ class SiteScraper(
         val (response, duration) = measureTimedValue {
             try {
                 SharedValues.client.get(element.url)
+            } catch (_: SocketTimeoutException) {
+                logger.warn("Socket timed out while scraping ${element.url}") // this mostly happens if we're running the program but then pause it via the debugger
+                null
             } catch (e: Exception) {
                 logger.error("Failed to scrape ${element.url}", e)
                 null
