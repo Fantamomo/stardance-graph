@@ -102,6 +102,11 @@ object ProjectParser {
         val descriptionElement = panel.selectFirst(".project-show__description")
         val description = descriptionElement?.text() ?: ""
 
+        val sourceUrlElement = panel.selectFirst(".project-show__pill--github")
+        val sourceUrlText = sourceUrlElement?.attr("href")
+        val sourceUrl = if (sourceUrlText != null) parseUrl(sourceUrlText) else null
+        if (sourceUrlElement != null && sourceUrl == null) logger.warn("Failed to parse source url in ${sourceUrlElement.cssSelector()} from $url")
+
         val followersElement = panel.selectFirst(".project-show__followers")?.selectFirst("strong")
         if (followersElement == null) {
             logger.error("Failed to find followers element in $url")
@@ -135,6 +140,7 @@ object ProjectParser {
             title = title,
             description = description,
             superstar = superstar,
+            sourceUrl = sourceUrl,
             followerCount = followers ?: 0,
             devlogCount = devlogCount ?: 0,
             hourCount = hourCount ?: 0,
