@@ -66,6 +66,11 @@ object ProjectParser {
             return null
         }
 
+        val bannerElement = main.selectFirst(".project-show__banner-image")
+        val bannerText = bannerElement?.attr("src")
+        val bannerUrl = if (bannerText != null) parseUrl(bannerText) else null
+        if (bannerElement != null && bannerUrl == null) logger.warn("Failed to parse banner URL in ${bannerElement.cssSelector()} from $url")
+
         val statsElement = panel.selectFirst(".project-show__stats")
         if (statsElement == null) {
             logger.error("Failed to find stats element in $url")
@@ -139,6 +144,7 @@ object ProjectParser {
             ),
             title = title,
             description = description,
+            bannerUrl = bannerUrl,
             superstar = superstar,
             sourceUrl = sourceUrl,
             followerCount = followers ?: 0,
