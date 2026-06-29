@@ -40,6 +40,7 @@ sealed interface Project : Sendable {
         override fun printable() = "Scraped Project"
 
         override fun getScrapable(result: MutableSet<Scrapable>) {
+            result.add(Scrapable.User(owner.name))
             when (posts.size) {
                 0 -> {}
                 1 -> posts[0].getScrapable(result)
