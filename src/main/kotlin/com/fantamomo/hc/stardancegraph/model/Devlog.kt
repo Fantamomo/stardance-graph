@@ -24,7 +24,7 @@ data class Devlog(
     override fun printable(): String = "Devlog"
 
     override fun getScrapable(result: MutableSet<Scrapable>) {
-        val result = getScrapableInternal()
+        result.addAll(getScrapableInternal())
         if (comments == null && commentsCount > 0) result.add(Scrapable.Devlog(projectId, id))
         else comments?.forEach { result.add(Scrapable.User(it.author.name)) }
     }
