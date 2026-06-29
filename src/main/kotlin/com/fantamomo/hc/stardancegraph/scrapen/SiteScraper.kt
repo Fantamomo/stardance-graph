@@ -312,7 +312,7 @@ class SiteScraper(
             return scrapedObject.build()
         }
         if (result != null) {
-            logger.info("Successfully scraped ${element.url}, result: ${runCatching { result.printable() }.getOrNull() ?: result::class.simpleName} (found ${result.getScrapable().size}) new scrapable's")
+            logger.info("Successfully scraped ${element.url}, result: ${runCatching { result.printable() }.getOrNull() ?: result::class.simpleName} (found ${result.getScrapable().size} new scrapable's)")
             scrapedObject.sendable = result
         } else {
             logger.warn("Failed to analyze ${element.url}")
