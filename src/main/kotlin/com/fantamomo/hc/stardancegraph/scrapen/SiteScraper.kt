@@ -63,7 +63,7 @@ class SiteScraper(
     // it is prioritized over toScrap, so that
     private val failedScrapable = Channel<Scrapable.WrappedScrapable<Retry>>(Channel.UNLIMITED)
 
-    private data class Retry(val retry: Int)
+    private data class Retry(val retryWeight: Int, var actuallyRetries: Int)
 
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val scrapedCount = AtomicInt(0)
@@ -140,7 +140,7 @@ class SiteScraper(
             localRequests++
             withContext(CoroutineName("Scraper$$scraperId-$number")) {
                 if (element is Scrapable.WrappedScrapable<*>) {
-                    logger.info("Scraping ${element.unwrap().url} (${(element.data as? Retry)?.retry?.let { "retry $it" } ?: "retry not available"})")
+                    logger.info("Scraping ${element.unwrap().url} (${(element.data as? Retry)?.retryWeight?.let { "retry $it" } ?: "retry not available"})")
                 } else {
                     logger.info("Scraping ${element.url}")
                 }
@@ -165,7 +165,7 @@ class SiteScraper(
         while (true) {
             val result = select {
                 failedScrapable.onReceive {
-                    logger.warn("Retrying ${it.unwrap().url} (retry ${it.data.retry})")
+                    logger.warn("Retrying ${it.unwrap().url} (retry ${it.data.retryWeight})")
                     it
                 }
                 toScrap.onReceiveCatching {
@@ -206,21 +206,31 @@ class SiteScraper(
         scrapedObject.method = HttpMethod.Get
         scrapedObject.requestedAt = Clock.System.now()
 
+        var socketTimeoutException = false
+
         val (response, duration) = measureTimedValue {
             try {
                 SharedValues.client.get(element.url)
             } catch (_: SocketTimeoutException) {
                 logger.warn("Socket timed out while scraping ${element.url}") // this mostly happens if we're running the program but then pause it via the debugger
+                socketTimeoutException = true
                 null
             } catch (e: Exception) {
                 logger.error("Failed to scrape ${element.url}", e)
                 null
             }
         }
+
+        ((toScrap as? Scrapable.WrappedScrapable<*>)?.data as? Retry)?.let { it.actuallyRetries++ }
+
         scrapedObject.duration = duration
         if (response == null) {
             scrapedObject.statusCode = -1
-            toScrap.retry()
+            if (socketTimeoutException) {
+                toScrap.retry(weight = 1)
+            } else {
+                toScrap.retry()
+            }
             return scrapedObject.build()
         }
         scrapedObject.statusCode = response.status.value
@@ -270,6 +280,7 @@ class SiteScraper(
                     logger.warn("Too many requests, waiting for $retryAfter")
                 } // else we are already rate limited, so we don't need to do anything
 //                failedScrapable.add(element)
+                toScrap.retry(weight = 1) // if it is only rate-limited, we set the weight to 1, so that we are going to try it much more often
                 return scrapedObject.build()
             } else if (response.status.value in 500..599) {
                 var bodyContent = runCatching { response.bodyAsText() }.getOrNull()?.let { "\"$it\"" } ?: "no body"
@@ -396,15 +407,22 @@ class SiteScraper(
         return null
     }
 
-    private suspend fun Scrapable.retry() {
-        val retry = ((this as? Scrapable.WrappedScrapable<*>)?.data as? Retry)?.retry ?: 0
+    private suspend fun Scrapable.retry(weight: Int = 10) {
+        val retry = ((this as? Scrapable.WrappedScrapable<*>)?.data as? Retry)
+        val retryWeight = retry?.retryWeight ?: 0
 
-        if (retry >= 3) {
-            logger.warn("Failed to scrape ${unwrap().url} after 3 retries")
+        if (retryWeight > 30) {
+            logger.warn("Failed to scrape ${unwrap().url} after ${retry!!.actuallyRetries} retries")
             return
         }
 
-        val wrapped = Scrapable.WrappedScrapable(unwrap(), Retry(retry + 1))
+        val wrapped = Scrapable.WrappedScrapable(
+            scrapable = unwrap(),
+            data = Retry(
+                retryWeight = retryWeight + weight,
+                actuallyRetries = retry?.actuallyRetries ?: 0
+            )
+        )
 
 //        yield()
 //        Scraper.scope.launch {
