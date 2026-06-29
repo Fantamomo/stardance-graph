@@ -27,6 +27,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.slf4j.LoggerFactory
 import java.net.SocketTimeoutException
+import java.nio.channels.ClosedChannelException
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.incrementAndFetch
@@ -90,8 +91,17 @@ class SiteScraper(
         var localRequests = 0
         var dbOverloaded = false
         while (true) {
-            val element = nextScrapable()
-            if (checkOrAddUser(element)) continue
+            val element = try {
+                nextScrapable()
+            } catch (_: ClosedChannelException) {
+                logger.info("no more work, scraper $scraperId stops its work")
+                return
+            }
+            if (checkOrAddUser(element)) {
+                @Suppress("Deprecation")
+                scraped.send(ScrapedObject.EMPTY) // we need to send something so that we don't "coroutine lock" (???) (= thread lock) ourselves
+                continue
+            }
 
             val rateLimitedUntil = rateLimitedUntil
             if (rateLimitedUntil != null) {
@@ -130,7 +140,7 @@ class SiteScraper(
             localRequests++
             withContext(CoroutineName("Scraper$$scraperId-$number")) {
                 if (element is Scrapable.WrappedScrapable<*>) {
-                    logger.info("Scraping ${element.unwrap().url} (${(element.data as? Retry)?.retry?.let { "retry $it" } ?: "retry not available"}")
+                    logger.info("Scraping ${element.unwrap().url} (${(element.data as? Retry)?.retry?.let { "retry $it" } ?: "retry not available"})")
                 } else {
                     logger.info("Scraping ${element.url}")
                 }
@@ -152,15 +162,30 @@ class SiteScraper(
     }
 
     private suspend fun nextScrapable(): Scrapable = toScrapMutex.withLock {
-        select {
-            failedScrapable.onReceive {
-                logger.warn("Retrying ${it.unwrap().url} (retry ${it.data.retry})")
-                it
+        while (true) {
+            val result = select {
+                failedScrapable.onReceive {
+                    logger.warn("Retrying ${it.unwrap().url} (retry ${it.data.retry})")
+                    it
+                }
+                toScrap.onReceiveCatching {
+                    if (it.isClosed) {
+//                        logger.info("toScrap channel is closed, stopping") // no need to log it, the receiver of the exception will handle it
+                        throw ClosedChannelException()
+                    }
+                    if (it.isFailure) {
+                        logger.error("Error in toScrap channel", it.exceptionOrNull())
+                        null
+                    } else it.getOrNull()
+                }
             }
-            toScrap.onReceive {
-                it
+            if (result == null) {
+                continue
             }
+            return@withLock result
         }
+        @Suppress("KotlinUnreachableCode") // well, it is unreachable, but if we remove the unreachable code, the compiler complains that withLock would return Unit, which is not possible
+        throw IllegalStateException("unreachable code reached")
     }
 
     private fun checkOrAddUser(element: Scrapable): Boolean {

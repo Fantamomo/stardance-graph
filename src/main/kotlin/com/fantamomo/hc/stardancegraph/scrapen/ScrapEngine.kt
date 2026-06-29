@@ -143,7 +143,11 @@ class ScrapEngine {
             emptyList()
         }
 
-        val rngLaunchDate = LocalDate(2026, 6, 15) // from https://github.com/Fantamomo/stardance/blob/dd6a05b73c3796ecd18a80255fb1be68dfd053a7/app/models/daily_roll.rb#L34
+        val rngLaunchDate = LocalDate(
+            year = 2026,
+            month = 6,
+            day = 15
+        ) // from https://github.com/Fantamomo/stardance/blob/dd6a05b73c3796ecd18a80255fb1be68dfd053a7/app/models/daily_roll.rb#L34
         val currentDate = Clock.System.now().toLocalDateTime(TimeZone.UTC).date
 
         val fromRngScrapDate = when {
@@ -186,49 +190,67 @@ class ScrapEngine {
         if (dispatched) logger.info("Waiting for databaseWriter to finish")
         val waitingDuration = measureTime { job.join() }
         if (dispatched) logger.info("DatabaseWriter finished in $waitingDuration")
-        logger.info("Finished")
     }
 
     private suspend fun progress() {
         var sendToToScrape = 0
         var sendLimitError = false
-        for (element in foundChannel) {
-            databaseChannel.send(element)
-            databaseChannelSize.incrementAndFetch()
+        while (true) {
+            val elementResult = foundChannel.receiveCatching()
 
-            val sendable = element.sendable
-            if (sendable != null) {
-                if (sendable is Project.ScrapedProject) {
-                    biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, sendable.id)
+            if (elementResult.isClosed) {
+                logger.info("foundChannel is closed")
+                break
+            }
+            if (elementResult.isFailure) {
+                logger.error("Error in foundChannel", elementResult.exceptionOrNull())
+                continue
+            }
+            val element = elementResult.getOrNull()
+            if (element == null) {
+                logger.error("Received null from successfully result, this should never happen")
+                continue
+            }
+
+            @Suppress("Deprecation")
+            if (element != ScrapedObject.EMPTY) {
+                databaseChannel.send(element)
+                databaseChannelSize.incrementAndFetch()
+
+                val sendable = element.sendable
+                if (sendable != null) {
+                    if (sendable is Project.ScrapedProject) {
+                        biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, sendable.id)
 //                logger.info("biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId")
-                    project404ErrorCount.store(0)
-                }
+                        project404ErrorCount.store(0)
+                    }
 
-                if (sendable is User.ScrapedUser) {
-                    scrapedUsers.add(sendable.name)
-                    sendable.internalId?.let { scrapedUsers.add(it) }
-                } else if (sendable is User.UnverifiedUser) {
-                    scrapedUsers.add(sendable.name)
-                    sendable.internalId?.let { scrapedUsers.add(it) }
-                }
+                    if (sendable is User.ScrapedUser) {
+                        scrapedUsers.add(sendable.name)
+                        sendable.internalId?.let { scrapedUsers.add(it) }
+                    } else if (sendable is User.UnverifiedUser) {
+                        scrapedUsers.add(sendable.name)
+                        sendable.internalId?.let { scrapedUsers.add(it) }
+                    }
 
-                val scrapable = sendable.getScrapable()
-                if (scrapable.isNotEmpty()) {
-                    for (link in scrapable) {
-                        if (link is Scrapable.Project) {
-                            biggestProjectId = maxOf(biggestProjectId, link.id)
-                        }
+                    val scrapable = sendable.getScrapable()
+                    if (scrapable.isNotEmpty()) {
+                        for (link in scrapable) {
+                            if (link is Scrapable.Project) {
+                                biggestProjectId = maxOf(biggestProjectId, link.id)
+                            }
 
-                        updateStatsFound(link)
+                            updateStatsFound(link)
 
-                        if (scrapedLinks.add(link.url)) {
-                            updateStatsUnique(link)
-                            sendToToScrape++
-                            if (sendToToScrape <= LIMIT_SCRAPES) {
-                                sendtoScrapWithUserCheck(link)
-                            } else if (!sendLimitError) {
-                                logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
-                                sendLimitError = true
+                            if (scrapedLinks.add(link.url)) {
+                                updateStatsUnique(link)
+                                sendToToScrape++
+                                if (sendToToScrape <= LIMIT_SCRAPES) {
+                                    sendtoScrapWithUserCheck(link)
+                                } else if (!sendLimitError) {
+                                    logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
+                                    sendLimitError = true
+                                }
                             }
                         }
                     }

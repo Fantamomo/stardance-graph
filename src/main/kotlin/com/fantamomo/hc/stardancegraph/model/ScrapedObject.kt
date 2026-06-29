@@ -18,6 +18,23 @@ class ScrapedObject(
     val receivedBytes: UInt?,
     val devFooter: DevFooter?
 ) {
+    companion object {
+        @Deprecated("Dont use this, it is used internally for a bug fix.", ReplaceWith(""), DeprecationLevel.WARNING)
+        val EMPTY = ScrapedObject(
+            sendable = null,
+            scraperId = -1,
+            url = Url("https://stardance.hackclub.com/"),
+            type = RequestType.UNKNOWN,
+            method = HttpMethod.Get,
+            requestedAt = Instant.DISTANT_PAST,
+            duration = Duration.ZERO,
+            statusCode = 0,
+            sendBytes = null,
+            receivedBytes = null,
+            devFooter = null
+        )
+    }
+
     data class DevFooter(
         val build: String,
         val timeAgo: Duration,
