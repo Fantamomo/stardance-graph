@@ -60,7 +60,7 @@ class SiteScraper(
 
     // if we fail to scrape a scrapable, we put it in this channel
     // it is prioritized over toScrap, so that
-    private val failedScrapable = Channel<Scrapable.WrappedScrapable<Retry>>()
+    private val failedScrapable = Channel<Scrapable.WrappedScrapable<Retry>>(Channel.UNLIMITED)
 
     private data class Retry(val retry: Int)
 
@@ -129,7 +129,11 @@ class SiteScraper(
             val number = scrapedCount.incrementAndFetch()
             localRequests++
             withContext(CoroutineName("Scraper$$scraperId-$number")) {
-                logger.info("Scraping ${element.url}")
+                if (element is Scrapable.WrappedScrapable<*>) {
+                    logger.info("Scraping ${element.unwrap().url} (${(element.data as? Retry)?.retry?.let { "retry $it" } ?: "retry not available"}")
+                } else {
+                    logger.info("Scraping ${element.url}")
+                }
 
                 val scrapedObject = scrapeSite(element, scraperId)
 
@@ -150,7 +154,7 @@ class SiteScraper(
     private suspend fun nextScrapable(): Scrapable = toScrapMutex.withLock {
         select {
             failedScrapable.onReceive {
-                logger.warn("Retrying ${it.data} (retry ${it.data.retry})")
+                logger.warn("Retrying ${it.unwrap().url} (retry ${it.data.retry})")
                 it
             }
             toScrap.onReceive {
@@ -243,10 +247,23 @@ class SiteScraper(
 //                failedScrapable.add(element)
                 return scrapedObject.build()
             } else if (response.status.value in 500..599) {
-                logger.warn(
-                    "Server error, waiting for 1 minutes: ${
-                        runCatching { response.bodyAsText() }.getOrNull()?.let { "\"$it\"" } ?: "no body"
-                    }")
+                var bodyContent = runCatching { response.bodyAsText() }.getOrNull()?.let { "\"$it\"" } ?: "no body"
+
+                if (bodyContent.contains("Something went wrong on our end.") &&
+                    bodyContent.contains("If you need help, share this reference code:") &&
+                    bodyContent.contains("If you feel like this was a mistake, let us know in")
+                ) {
+                    // the default stardance 500 error page
+                    bodyContent = "Stardance 500 error page"
+                }
+
+                if (bodyContent.length > 1000) {
+                    bodyContent = bodyContent
+                        .substring(0, 1000) +
+                            "... (truncated to 1000, original length: ${bodyContent.length})"
+                }
+
+                logger.warn("Server error, waiting for 1 minutes: $bodyContent")
             } else if (response.status.value == 404) {
                 logger.warn("Requesting ${element.url} returned ${HttpStatusCode.NotFound}")
                 return scrapedObject.build()
@@ -295,7 +312,7 @@ class SiteScraper(
             return scrapedObject.build()
         }
         if (result != null) {
-            logger.info("Successfully scraped ${element.url}, result: ${result::class.java.name}")
+            logger.info("Successfully scraped ${element.url}, result: ${runCatching { result.printable() }.getOrNull() ?: result::class.simpleName} (found ${result.getScrapable().size}) new scrapable's")
             scrapedObject.sendable = result
         } else {
             logger.warn("Failed to analyze ${element.url}")
@@ -363,7 +380,11 @@ class SiteScraper(
         }
 
         val wrapped = Scrapable.WrappedScrapable(unwrap(), Retry(retry + 1))
+
+//        yield()
+//        Scraper.scope.launch {
         failedScrapable.send(wrapped)
+//        }
     }
 
     companion object {

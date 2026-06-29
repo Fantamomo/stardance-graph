@@ -5,11 +5,11 @@ class ProjectFollowers(
     val owner: User,
     val followers: List<User>,
 ) : Sendable {
-    override fun getScrapable(): Set<Scrapable> {
-        val result = mutableSetOf<Scrapable>()
+    override fun printable() = "Project Followers"
+
+    override fun getScrapable(result: MutableSet<Scrapable>) {
         result.add(Scrapable.Project(project))
-        result.addAll(owner.getScrapable())
+        owner.getScrapable(result)
         followers.forEach { result.add(Scrapable.User(it.name)) }
-        return result
     }
 }

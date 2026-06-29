@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm") version "2.4.0"
     alias(libs.plugins.kotlin.serialization)
     id("org.jetbrains.exposed.plugin") version "1.3.0"
+    id("com.gradleup.shadow") version "9.4.3"
 }
 
 group = "com.fantamomo.hc"
@@ -42,5 +43,16 @@ exposed {
         tablesPackage.set("com.fantamomo.hc.stardancegraph.db")
         testContainersImageName.set("postgres:latest")
         fileDirectory.set(layout.projectDirectory.dir("src/main/resources/db/migration"))
+    }
+}
+tasks {
+    shadowJar {
+        mergeServiceFiles()
+
+        manifest {
+            attributes(
+                "Main-Class" to "com.fantamomo.hc.stardancegraph.MainKt"
+            )
+        }
     }
 }

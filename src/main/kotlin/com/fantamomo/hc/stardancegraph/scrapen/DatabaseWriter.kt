@@ -64,7 +64,6 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
                 finished.complete(Unit)
                 return@coroutineScope
             }
-            elements.add(channel.receive())
             engine.databaseChannelSize.decrementAndFetch()
             while (isActive && !channel.isClosedForReceive) {
                 val element = channel.tryReceive()

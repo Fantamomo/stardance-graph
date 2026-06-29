@@ -80,7 +80,11 @@ class ScrapEngine {
     suspend fun run(): Result = supervisorScope {
         launch(CoroutineName("DatabaseWriter")) {
             // starting the database writer
-            databaseWriter.start()
+            try {
+                databaseWriter.start()
+            } catch (e: Exception) {
+                logger.error("Error in Database Writer", e)
+            }
         }
         launch(CoroutineName("ScrapProgress")) {
             // starting the mapper which reads from foundChannel(siteScraper) and writes to databaseWriter and toScapeChannel

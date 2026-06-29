@@ -16,7 +16,7 @@ object ShipEventTable : Table("ship_events") {
     val hourCount = integer("hour_count")
     val attachedMission = varchar("attached_mission", 30).nullable()
 
-    val description = varchar("description", 4000)
+    val description = varchar("description", 4_500)
 
     val firstSeen = reference("first_seen", RequestTable.id)
     val lastSeen = reference("last_seen", RequestTable.id)

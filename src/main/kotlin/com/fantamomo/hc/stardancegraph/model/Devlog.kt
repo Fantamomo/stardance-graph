@@ -21,10 +21,11 @@ data class Devlog(
 ) : Post {
     fun wasDirectlyScraped(): Boolean = comments != null
 
-    override fun getScrapable(): Set<Scrapable> {
+    override fun printable(): String = "Devlog"
+
+    override fun getScrapable(result: MutableSet<Scrapable>) {
         val result = getScrapableInternal()
         if (comments == null && commentsCount > 0) result.add(Scrapable.Devlog(projectId, id))
         else comments?.forEach { result.add(Scrapable.User(it.author.name)) }
-        return result
     }
 }

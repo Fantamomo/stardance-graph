@@ -1,0 +1,1 @@
+ALTER TABLE ship_events ALTER COLUMN description TYPE VARCHAR(4500);

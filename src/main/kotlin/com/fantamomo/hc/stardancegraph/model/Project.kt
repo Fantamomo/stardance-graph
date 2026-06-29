@@ -12,6 +12,12 @@ sealed interface Project : Sendable {
         override val id: Int,
         override val owner: User
     ) : Project {
+        override fun printable() = "Found Project"
+
+        override fun getScrapable(result: MutableSet<Scrapable>) {
+            result.addAll(getScrapableInternal())
+        }
+
         override fun getScrapable(): Set<Scrapable> = getScrapableInternal()
     }
 
@@ -31,15 +37,15 @@ sealed interface Project : Sendable {
         val missionShipped: Boolean?,
         val posts: List<Post>
     ) : Project {
-        override fun getScrapable(): Set<Scrapable> {
-            val result = mutableSetOf<Scrapable>()
+        override fun printable() = "Scraped Project"
+
+        override fun getScrapable(result: MutableSet<Scrapable>) {
             when (posts.size) {
-                 0 -> {}
-                 1 -> result.addAll(posts[0].getScrapable())
-                else -> posts.flatMapTo(result) { it.getScrapable() }
+                0 -> {}
+                1 -> posts[0].getScrapable(result)
+                else -> posts.forEach { it.getScrapable(result) }
             }
             if (followerCount > 0) result.add(Scrapable.ProjectFollowers(id, owner))
-            return result
         }
     }
 }
