@@ -112,31 +112,31 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
     private suspend fun saveToDatabase(elements: List<ScrapedObject>) {
         try {
-            var slowInsert = true
-            if (elements.size > 5) {
-                // if the size is greater than 5, we will try to insert optimized so that it is faster,
-                // but the chance that something goes wrong is higher, so if something goes wrong, we will insert manually
-                try {
-                    DatabaseManager.transaction {
-                        insertOptimised(elements)
+//            var slowInsert = true
+//            if (elements.size > 5) {
+//                // if the size is greater than 5, we will try to insert optimized so that it is faster,
+//                // but the chance that something goes wrong is higher, so if something goes wrong, we will insert manually
+//                try {
+//                    DatabaseManager.transaction {
+//                        insertOptimised(elements)
+//                    }
+//                    slowInsert = false
+//                } catch (e: Exception) {
+//                    logger.error("Error saving to database", e)
+//                }
+//            }
+//            if (slowInsert) {
+            DatabaseManager.transaction {
+                databaseRequestsInternal.incrementAndFetch()
+                elements.forEach { element ->
+                    try {
+                        insert(element)
+                    } catch (e: Exception) {
+                        logger.error("Error saving ${element::class.java.name} to database", e)
                     }
-                    slowInsert = false
-                } catch (e: Exception) {
-                    logger.error("Error saving to database", e)
                 }
             }
-            if (slowInsert) {
-                DatabaseManager.transaction {
-                    databaseRequestsInternal.incrementAndFetch()
-                    elements.forEach { element ->
-                        try {
-                            insert(element)
-                        } catch (e: Exception) {
-                            logger.error("Error saving ${element::class.java.name} to database", e)
-                        }
-                    }
-                }
-            }
+//            }
         } catch (e: Exception) {
             logger.error("Error saving to database", e)
         }
@@ -555,6 +555,21 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ShipEventTable.firstSeen] = requestId
             it[ShipEventTable.lastSeen] = requestId
         }
+        if (element.attachments.isNotEmpty()) {
+            var attachmentsCount = 0
+            ShipEventAttachmentsTable.batchUpsert(
+                element.attachments,
+                onUpdateExclude = listOf(ShipEventAttachmentsTable.firstSeen),
+                shouldReturnGeneratedValues = false
+            ) {
+                this[ShipEventAttachmentsTable.shipEvent] = element.internalId
+                this[ShipEventAttachmentsTable.number] = attachmentsCount++
+                this[ShipEventAttachmentsTable.url] = it
+
+                this[ShipEventAttachmentsTable.firstSeen] = requestId
+                this[ShipEventAttachmentsTable.lastSeen] = requestId
+            }
+        }
     }
 
     private suspend fun insertRepost(element: Repost, requestId: Int) {
@@ -608,18 +623,20 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[DevlogTable.firstSeen] = requestId
             it[DevlogTable.lastSeen] = requestId
         }
-        var attachmentsCount = 0
-        DevlogAttachmentsTable.batchUpsert(
-            element.attachments,
-            onUpdateExclude = listOf(DevlogAttachmentsTable.firstSeen),
-            shouldReturnGeneratedValues = false
-        ) {
-            this[DevlogAttachmentsTable.id] = element.id
-            this[DevlogAttachmentsTable.number] = attachmentsCount++
-            this[DevlogAttachmentsTable.url] = it
+        if (element.attachments.isNotEmpty()) {
+            var attachmentsCount = 0
+            DevlogAttachmentsTable.batchUpsert(
+                element.attachments,
+                onUpdateExclude = listOf(DevlogAttachmentsTable.firstSeen),
+                shouldReturnGeneratedValues = false
+            ) {
+                this[DevlogAttachmentsTable.id] = element.id
+                this[DevlogAttachmentsTable.number] = attachmentsCount++
+                this[DevlogAttachmentsTable.url] = it
 
-            this[DevlogAttachmentsTable.firstSeen] = requestId
-            this[DevlogAttachmentsTable.lastSeen] = requestId
+                this[DevlogAttachmentsTable.firstSeen] = requestId
+                this[DevlogAttachmentsTable.lastSeen] = requestId
+            }
         }
         if (element.comments != null) {
             for (comment in element.comments) {
