@@ -10,10 +10,11 @@ data class Repost(
     val devlogId: Int,
     val message: String?,
 ) : Post {
-    override fun getScrapable(): MutableSet<Scrapable> {
-        val scrapables = getScrapableInternal()
-        scrapables.add(Scrapable.Devlog(projectId, devlogId))
-        scrapables.add(Scrapable.User(devlogAuthor.name))
-        return scrapables
+    override fun printable() = "Repost"
+
+    override fun getScrapable(result: MutableSet<Scrapable>) {
+        result.addAll(getScrapableInternal())
+        result.add(Scrapable.Devlog(projectId, devlogId))
+        result.add(Scrapable.User(devlogAuthor.name))
     }
 }

@@ -17,6 +17,13 @@ data class ShipEvent(
     val devlogCount: Int,
     val hourCount: Int,
     val mission: String?,
+    val attachments: List<String>
 ) : Post {
+    override fun printable() = "Ship Event"
+
+    override fun getScrapable(result: MutableSet<Scrapable>) {
+        result.addAll(getScrapableInternal())
+    }
+
     override fun getScrapable() = getScrapableInternal()
 }

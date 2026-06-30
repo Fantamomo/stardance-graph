@@ -37,6 +37,7 @@ object App {
             run()
         }
         job.join()
+        logger.info("Program iteration $programId finished, exiting ...")
     }
 
     private suspend fun init() {

@@ -17,6 +17,7 @@ import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.properties.Delegates
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.measureTimedValue
 
 object Scraper {
     private val logger = Logger()
@@ -53,16 +54,20 @@ object Scraper {
         val waitingDelay = WaitingDelay()
         val requestStatistics = RequestStatistics()
         val networkStats = NetworkStats()
-        val result = try {
-            withContext(
-                waitingDelay + RequestStatisticsContext(requestStatistics) + networkStats
-            ) {
-                run()
+        val (result, duration) = measureTimedValue {
+            try {
+                val result = withContext(
+                    waitingDelay + RequestStatisticsContext(requestStatistics) + networkStats
+                ) {
+                    run()
+                }
+                result
+            } catch (e: Throwable) {
+                logger.error("Error while scraping", e)
+                null
             }
-        } catch (e: Throwable) {
-            logger.error("Error while scraping", e)
-            null
         }
+        logger.info("ScrapEngine finished after $duration")
 
         val engine = engine
 
@@ -75,10 +80,14 @@ object Scraper {
 
                 val requestsPerType = requestStatistics.requestsPerType
                 it[RequestIterationsTable.requestedUsers] = requestsPerType[RequestType.USER.name]?.load() ?: 0
-                it[RequestIterationsTable.requestedUserFollowers] = requestsPerType[RequestType.USER_FOLLOWERS.name]?.load() ?: 0
-                it[RequestIterationsTable.requestedUserFollowing] = requestsPerType[RequestType.USER_FOLLOWING.name]?.load() ?: 0
-                it[RequestIterationsTable.requestedProjects] = requestsPerType[RequestType.PROJECT.name]?.load() ?: 0
-                it[RequestIterationsTable.requestedProjectFollowers] = requestsPerType[RequestType.PROJECT_FOLLOWERS.name]?.load() ?: 0
+                it[RequestIterationsTable.requestedUserFollowers] =
+                    requestsPerType[RequestType.USER_FOLLOWERS.name]?.load() ?: 0
+                it[RequestIterationsTable.requestedUserFollowing] =
+                    requestsPerType[RequestType.USER_FOLLOWING.name]?.load() ?: 0
+                it[RequestIterationsTable.requestedProjects] =
+                    requestsPerType[RequestType.PROJECT.name]?.load() ?: 0
+                it[RequestIterationsTable.requestedProjectFollowers] =
+                    requestsPerType[RequestType.PROJECT_FOLLOWERS.name]?.load() ?: 0
                 it[RequestIterationsTable.requestedDevlogs] = requestsPerType[RequestType.DEVLOG.name]?.load() ?: 0
 
                 @Suppress("DuplicatedCode")
@@ -101,7 +110,8 @@ object Scraper {
                 }
 
                 it[RequestIterationsTable.totalErrors] = requestStatistics.exceptionCount.load()
-                it[RequestIterationsTable.totalNonSuccessResponses] = requestStatistics.nonSuccessfulStatusCodeCount.load()
+                it[RequestIterationsTable.totalNonSuccessResponses] =
+                    requestStatistics.nonSuccessfulStatusCodeCount.load()
 
                 if (engine != null) {
                     val siteStats = engine.siteStats

@@ -109,7 +109,7 @@ object RngParser {
                 continue
             }
             val medal = when (medalElement.text().removePrefix("#")) {
-                "*", "1" -> 1
+                "*", "★", "1" -> 1
                 "2" -> 2
                 "3" -> 3
                 else -> {

@@ -122,7 +122,7 @@ object ProjectParser {
 
         val superstar = panel.selectFirst(".project-show__badge--fire") != null
 
-        val missionElement = panel.selectFirst(".mission-panel")
+        val missionElement = html.selectFirst(".mission-panel")
         val missionData = if (missionElement != null) {
             val isMissionShipped = missionElement.hasClass("mission-panel--shipped")
             val mission = missionElement.selectFirst(".mission-panel__title")?.text()

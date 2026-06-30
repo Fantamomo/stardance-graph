@@ -4,5 +4,10 @@ class UserFollowing(
     val user: User,
     val following: List<User>,
 ) : Sendable {
-    override fun getScrapable() = user.getScrapable() + following.flatMap { it.getScrapable() }
+    override fun printable() = "User Following"
+
+    override fun getScrapable(result: MutableSet<Scrapable>) {
+        user.getScrapable(result)
+        following.forEach { it.getScrapable(result) }
+    }
 }

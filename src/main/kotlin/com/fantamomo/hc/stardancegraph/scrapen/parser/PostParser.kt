@@ -42,7 +42,7 @@ object PostParser {
         }
 
         return when (type) {
-            "Post::Repost" -> parseRepost(html, url, null,internalId, author, true)
+            "Post::Repost" -> parseRepost(html, url, null, internalId, author, true)
             "Post::Devlog" -> {
                 // parseDevlog(html, url) // if it would be that easy, a repost without a message is actually a devlog with another author and another id
                 parseDevlogOrRepost(html, url, projectId!!, internalId, author)
@@ -64,10 +64,18 @@ object PostParser {
         return parseDevlog(html, url, projectId, internalId, author)
     }
 
-    private fun parseRepost(html: Element, url: Url, projectId: Int?, internalId: Int, author: String, quoted: Boolean): Repost? {
+    private fun parseRepost(
+        html: Element,
+        url: Url,
+        projectId: Int?,
+        internalId: Int,
+        author: String,
+        quoted: Boolean
+    ): Repost? {
         val devlogContentElement = html.selectFirst(".feed-post-card__repost-preview")?.selectFirst("> article") ?: html
 
-        val repostedByElement = html.selectFirst(".feed-post-card__reposted-by-link") ?: if (quoted) html.selectFirst(".feed-post-card__author") else null
+        val repostedByElement = html.selectFirst(".feed-post-card__reposted-by-link")
+            ?: if (quoted) html.selectFirst(".feed-post-card__author") else null
         if (repostedByElement == null) {
             logger.warn("Failed to find reposted by element in ${html.cssSelector()} from $url")
             return null
@@ -79,7 +87,9 @@ object PostParser {
         }
         val projectId = projectId ?: devlogContentElement.attr("data-feed-engagement-project-id-value").toIntOrNull()
         if (projectId == null) {
-            if (html.attr("data-card-link-url-value").isNotEmpty()) { // the data-card-link-url-value does not exists for reposts from devlgos where the author hasn't verified there identity yet
+            if (html.attr("data-card-link-url-value")
+                    .isNotEmpty()
+            ) { // the data-card-link-url-value does not exists for reposts from devlgos where the author hasn't verified there identity yet
                 logger.warn("Failed to find project ID in ${html.cssSelector()} from $url")
             }
             return null
@@ -229,7 +239,10 @@ object PostParser {
         val createdAt = try {
             Instant.parse(createdAtText)
         } catch (e: Exception) {
-            logger.warn("Failed to parse created at '$createdAtText' from '$createdAtText' in ${createdAtElement.cssSelector()} from $url", e)
+            logger.warn(
+                "Failed to parse created at '$createdAtText' from '$createdAtText' in ${createdAtElement.cssSelector()} from $url",
+                e
+            )
             return null
         }
 
@@ -250,9 +263,13 @@ object PostParser {
             logger.warn("Expected 2 stats in ${statsElement.cssSelector()} from $url, but found ${stats.size} instead")
             return null
         }
-        val devlogCount = stats.entries.firstOrNull { !it.key.hasClass("profile-project-card__meta-item--time") }?.value?.takeWhile { it.isDigit() }?.toIntOrNull()
+        val devlogCount =
+            stats.entries.firstOrNull { !it.key.hasClass("profile-project-card__meta-item--time") }?.value?.takeWhile { it.isDigit() }
+                ?.toIntOrNull()
         if (devlogCount == null) logger.warn("Failed to find devlog count in ${statsElement.cssSelector()} from $url")
-        val hourCount = stats.entries.firstOrNull { it.key.hasClass("profile-project-card__meta-item--time") }?.value?.takeWhile { it.isDigit() }?.toIntOrNull()
+        val hourCount =
+            stats.entries.firstOrNull { it.key.hasClass("profile-project-card__meta-item--time") }?.value?.takeWhile { it.isDigit() }
+                ?.toIntOrNull()
         if (hourCount == null) logger.warn("Failed to find hour count in ${statsElement.cssSelector()} from $url")
         val mission = stats.entries.firstOrNull { it.key.hasClass("profile-project-card__meta-item--mission") }?.value
 
@@ -262,12 +279,16 @@ object PostParser {
             return null
         }
         val links = linkElement.select(".project-show__latest-ship-btn").associateBy { it.text() }
-        val demoUrlText = links.entries.firstOrNull { it.key.lowercase().run { contains("try") || contains("project") } }?.value?.attr("href")
+        val demoUrlText = links.entries.firstOrNull {
+            it.key.lowercase().run { contains("try") || contains("project") }
+        }?.value?.attr("href")
         if (demoUrlText == null) {
             logger.warn("Failed to find demo URL in ${linkElement.cssSelector()} from $url")
             return null
         }
-        val repoUrlText = links.entries.firstOrNull { it.key.lowercase().run { contains("source") || contains("code") } }?.value?.attr("href")
+        val repoUrlText = links.entries.firstOrNull {
+            it.key.lowercase().run { contains("source") || contains("code") }
+        }?.value?.attr("href")
         if (repoUrlText == null) {
             logger.warn("Failed to find repo URL in ${linkElement.cssSelector()} from $url")
             return null
@@ -285,6 +306,15 @@ object PostParser {
             return null
         }
 
+        val attachmentsElement = html.selectFirst(".feed-post-card__media")
+        if (attachmentsElement == null) {
+            logger.warn("Failed to find attachments element in ${html.cssSelector()} from $url")
+        }
+        val images = attachmentsElement
+            ?.select("img")
+            ?.mapNotNull { node -> node.attr("src").takeIf { it.isNotBlank() } }
+            ?: emptyList()
+
         return ShipEvent(
             projectId = projectId,
             author = User.FoundUser(
@@ -301,7 +331,8 @@ object PostParser {
             repoUrl = repoUrl,
             devlogCount = devlogCount ?: 0,
             hourCount = hourCount ?: 0,
-            mission = mission
+            mission = mission,
+            attachments = images
         )
     }
 
@@ -351,7 +382,8 @@ object PostParser {
             logger.warn("Failed to find footer element in ${html.cssSelector()} from $url")
             return null
         }
-        val stats = footerElement.select(".feed-post-card__action").map { it.selectFirst("span")?.text()?.toIntOrNull() }
+        val stats =
+            footerElement.select(".feed-post-card__action").map { it.selectFirst("span")?.text()?.toIntOrNull() }
         if (stats.size != 2) {
             logger.warn("Expected 2 stats in ${footerElement.cssSelector()} from $url, but found ${stats.size} instead")
             return null

@@ -14,7 +14,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
-import kotlinx.datetime.*
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.r2dbc.select
 import org.slf4j.LoggerFactory
@@ -80,7 +83,11 @@ class ScrapEngine {
     suspend fun run(): Result = supervisorScope {
         launch(CoroutineName("DatabaseWriter")) {
             // starting the database writer
-            databaseWriter.start()
+            try {
+                databaseWriter.start()
+            } catch (e: Exception) {
+                logger.error("Error in Database Writer", e)
+            }
         }
         launch(CoroutineName("ScrapProgress")) {
             // starting the mapper which reads from foundChannel(siteScraper) and writes to databaseWriter and toScapeChannel
@@ -139,13 +146,17 @@ class ScrapEngine {
             emptyList()
         }
 
-        val rngLaunchDate = LocalDate(2026, 6, 15) // from https://github.com/Fantamomo/stardance/blob/dd6a05b73c3796ecd18a80255fb1be68dfd053a7/app/models/daily_roll.rb#L34
+        val rngLaunchDate = LocalDate(
+            year = 2026,
+            month = 6,
+            day = 15
+        ) // from https://github.com/Fantamomo/stardance/blob/dd6a05b73c3796ecd18a80255fb1be68dfd053a7/app/models/daily_roll.rb#L34
         val currentDate = Clock.System.now().toLocalDateTime(TimeZone.UTC).date
 
         val fromRngScrapDate = when {
             dates.isEmpty() -> rngLaunchDate
             dates.first() == currentDate -> currentDate
-            else -> dates.first() + DatePeriod(days = 1)
+            else -> dates.first() // always scrap the same last scraped date (because maybe something has changed)
         }
 
         val rngDates = fromRngScrapDate.daysUntilSequence(currentDate).iterator()
@@ -182,49 +193,67 @@ class ScrapEngine {
         if (dispatched) logger.info("Waiting for databaseWriter to finish")
         val waitingDuration = measureTime { job.join() }
         if (dispatched) logger.info("DatabaseWriter finished in $waitingDuration")
-        logger.info("Finished")
     }
 
     private suspend fun progress() {
         var sendToToScrape = 0
         var sendLimitError = false
-        for (element in foundChannel) {
-            databaseChannel.send(element)
-            databaseChannelSize.incrementAndFetch()
+        while (true) {
+            val elementResult = foundChannel.receiveCatching()
 
-            val sendable = element.sendable
-            if (sendable != null) {
-                if (sendable is Project.ScrapedProject) {
-                    biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, sendable.id)
+            if (elementResult.isClosed) {
+                logger.info("foundChannel is closed")
+                break
+            }
+            if (elementResult.isFailure) {
+                logger.error("Error in foundChannel", elementResult.exceptionOrNull())
+                continue
+            }
+            val element = elementResult.getOrNull()
+            if (element == null) {
+                logger.error("Received null from successfully result, this should never happen")
+                continue
+            }
+
+            @Suppress("Deprecation")
+            if (element != ScrapedObject.EMPTY) {
+                databaseChannel.send(element)
+                databaseChannelSize.incrementAndFetch()
+
+                val sendable = element.sendable
+                if (sendable != null) {
+                    if (sendable is Project.ScrapedProject) {
+                        biggestSuccessfullyScrapedProjectId = maxOf(biggestSuccessfullyScrapedProjectId, sendable.id)
 //                logger.info("biggestSuccessfullyScrapedProjectId = $biggestSuccessfullyScrapedProjectId")
-                    project404ErrorCount.store(0)
-                }
+                        project404ErrorCount.store(0)
+                    }
 
-                if (sendable is User.ScrapedUser) {
-                    scrapedUsers.add(sendable.name)
-                    sendable.internalId?.let { scrapedUsers.add(it) }
-                } else if (sendable is User.UnverifiedUser) {
-                    scrapedUsers.add(sendable.name)
-                    sendable.internalId?.let { scrapedUsers.add(it) }
-                }
+                    if (sendable is User.ScrapedUser) {
+                        scrapedUsers.add(sendable.name)
+                        sendable.internalId?.let { scrapedUsers.add(it) }
+                    } else if (sendable is User.UnverifiedUser) {
+                        scrapedUsers.add(sendable.name)
+                        sendable.internalId?.let { scrapedUsers.add(it) }
+                    }
 
-                val scrapable = sendable.getScrapable()
-                if (scrapable.isNotEmpty()) {
-                    for (link in scrapable) {
-                        if (link is Scrapable.Project) {
-                            biggestProjectId = maxOf(biggestProjectId, link.id)
-                        }
+                    val scrapable = sendable.getScrapable()
+                    if (scrapable.isNotEmpty()) {
+                        for (link in scrapable) {
+                            if (link is Scrapable.Project) {
+                                biggestProjectId = maxOf(biggestProjectId, link.id)
+                            }
 
-                        updateStatsFound(link)
+                            updateStatsFound(link)
 
-                        if (scrapedLinks.add(link.url)) {
-                            updateStatsUnique(link)
-                            sendToToScrape++
-                            if (sendToToScrape <= LIMIT_SCRAPES) {
-                                sendtoScrapWithUserCheck(link)
-                            } else if (!sendLimitError) {
-                                logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
-                                sendLimitError = true
+                            if (scrapedLinks.add(link.url)) {
+                                updateStatsUnique(link)
+                                sendToToScrape++
+                                if (sendToToScrape <= LIMIT_SCRAPES) {
+                                    sendtoScrapWithUserCheck(link)
+                                } else if (!sendLimitError) {
+                                    logger.warn("Limit of $LIMIT_SCRAPES scrapes reached, no new 'to scrape' element will be added to the queue")
+                                    sendLimitError = true
+                                }
                             }
                         }
                     }

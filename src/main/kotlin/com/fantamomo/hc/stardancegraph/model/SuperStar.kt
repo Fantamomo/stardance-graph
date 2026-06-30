@@ -10,5 +10,11 @@ data class SuperStar(
     val views: Int,
     val reposts: Int,
 ) : Post {
+    override fun printable() = "Superstar"
+
+    override fun getScrapable(result: MutableSet<Scrapable>) {
+        result.addAll(getScrapableInternal())
+    }
+
     override fun getScrapable() = getScrapableInternal()
 }
