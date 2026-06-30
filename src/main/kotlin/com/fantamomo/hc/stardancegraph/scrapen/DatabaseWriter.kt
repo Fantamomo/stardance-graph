@@ -227,7 +227,13 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             is UserFollower -> insertUserFollowers(element, requestId)
             is UserFollowing -> insertUserFollowing(element, requestId)
             is RngPage -> insertRngPage(element, requestId)
+            is UserProjects -> insertUserProjects(element, requestId)
         }
+    }
+
+    private suspend fun insertUserProjects(element: UserProjects, requestId: Int) {
+        insertMissingUser(element.user, requestId)
+        for (project in element.projects) insertUserProjectPageProject(project, requestId)
     }
 
     private suspend fun insertRngPage(element: RngPage, requestId: Int) {
@@ -314,6 +320,30 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         when (element) {
             is Project.FoundProject -> insertFoundProject(element, requestId)
             is Project.ScrapedProject -> insertScrapedProject(element, requestId)
+            is Project.UserProjectPageProject -> insertUserProjectPageProject(element, requestId)
+        }
+    }
+
+    private suspend fun insertUserProjectPageProject(
+        element: Project.UserProjectPageProject,
+        requestId: Int
+    ) {
+        insertMissingUser(element.owner, requestId)
+        ProjectTable.upsert(
+            onUpdateExclude = listOf(ProjectTable.firstSeen)
+        ) {
+            it[ProjectTable.id] = element.id
+            it[ProjectTable.owner] = element.owner.name
+            it[ProjectTable.title] = element.title
+            it[ProjectTable.bannerImage] = element.bannerUrl.toString()
+            it[ProjectTable.description] = element.description
+            it[ProjectTable.devlogCount] = element.devlogCount
+            it[ProjectTable.totalHours] = element.hoursCount
+            it[ProjectTable.lastUpdated] = element.lastUpdated
+            it[ProjectTable.lastUpdatedAt] = requestId
+
+            it[ProjectTable.firstSeen] = requestId
+            it[ProjectTable.lastRequested] = requestId
         }
     }
 

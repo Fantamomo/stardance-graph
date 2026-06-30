@@ -91,6 +91,7 @@ sealed interface User : Sendable {
                  1 -> posts[0].getScrapable(result)
                 else -> posts.forEach { it.getScrapable(result) }
             }
+            if (projectsCount > 0) result.add(Scrapable.UserProjects(name))
             if (followerCount > 0) result.add(Scrapable.UserFollowers(name, this))
             if (followingCount > 0) result.add(Scrapable.UserFollowing(name, this))
             if (hasMorePages) result.add(Scrapable.PagedUser(name, 2, this))

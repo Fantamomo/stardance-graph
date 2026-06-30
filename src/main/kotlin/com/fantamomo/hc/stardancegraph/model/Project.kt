@@ -1,6 +1,7 @@
 package com.fantamomo.hc.stardancegraph.model
 
 import io.ktor.http.*
+import kotlin.time.Duration
 
 sealed interface Project : Sendable {
     val id: Int
@@ -19,6 +20,23 @@ sealed interface Project : Sendable {
         }
 
         override fun getScrapable(): Set<Scrapable> = getScrapableInternal()
+    }
+
+    data class UserProjectPageProject(
+        override val id: Int,
+        override val owner: User,
+        val title: String,
+        val bannerUrl: Url,
+        val description: String,
+        val devlogCount: Int,
+        val hoursCount: Int,
+        val lastUpdated: Duration,
+    ) : Project {
+        override fun printable() = "User Project Page Project"
+
+        override fun getScrapable(result: MutableSet<Scrapable>) {
+            result.addAll(getScrapableInternal())
+        }
     }
 
     data class ScrapedProject(

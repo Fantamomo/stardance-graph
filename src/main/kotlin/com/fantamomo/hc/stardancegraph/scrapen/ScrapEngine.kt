@@ -332,6 +332,7 @@ class ScrapEngine {
             is Scrapable.ProjectFollowers -> foundProjectFollowers++
             is Scrapable.Devlog -> foundDevlogs++
             is Scrapable.RngPage -> {} // ignore
+            is Scrapable.UserProjects -> {} // ignore
             is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
@@ -347,6 +348,7 @@ class ScrapEngine {
             is Scrapable.ProjectFollowers -> uniqueProjectFollowers++
             is Scrapable.Devlog -> uniqueDevlogs++
             is Scrapable.RngPage -> {} // ignore
+            is Scrapable.UserProjects -> {} // ignore
             is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $scrapable")
         }
     }
