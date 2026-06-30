@@ -168,11 +168,11 @@ class ScrapEngine {
         ).max()
 
         for (i in 1..maxIterations) {
-            if (i <= 1) {
+            if (i <= INIT_PROJECTS_SCRAP) {
                 val project = Scrapable.Project(i)
                 sendToScrapUnique(project)
             }
-            if (i <= 1) {
+            if (i <= INIT_USERS_SCRAP) {
                 val user = Scrapable.UserId(i)
                 sendToScrapUnique(user)
             }
