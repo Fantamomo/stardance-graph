@@ -341,6 +341,7 @@ class SiteScraper(
                 is Scrapable.UserFollowing -> FollowParser.parseUserFollowing(html, element.url, element.user)
                 is Scrapable.RngPage -> RngParser.parse(html, element.url, element.page, element.date)
                 is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $element") // should never happen
+                is Scrapable.UserProjects -> UserSiteParser.parseUserProjects(html, element.url)
             }
         } catch (e: Exception) {
             logger.error("Failed to analyze ${element.url}", e)
