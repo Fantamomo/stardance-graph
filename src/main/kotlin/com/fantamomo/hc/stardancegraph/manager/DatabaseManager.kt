@@ -2,6 +2,7 @@ package com.fantamomo.hc.stardancegraph.manager
 
 import com.fantamomo.hc.stardancegraph.data.Config
 import com.fantamomo.hc.stardancegraph.db.*
+import com.fantamomo.hc.stardancegraph.db.timeline.*
 import com.fantamomo.hc.stardancegraph.util.Logger
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
@@ -77,6 +78,12 @@ object DatabaseManager {
             logger.info("First run, just initializing database, ignoring migrations")
             transaction {
                 SchemaUtils.create(
+                    DevlogTimelineTable,
+                    ProjectTimelineTable,
+                    ShipEventTimelineTable,
+                    SuperstarTimelineTable,
+                    UserTimelineTable,
+
                     AchievementTable,
                     CommentsTable,
                     DevlogAttachmentsTable,

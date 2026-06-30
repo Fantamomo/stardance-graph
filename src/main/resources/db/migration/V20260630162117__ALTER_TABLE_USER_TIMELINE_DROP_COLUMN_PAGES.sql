@@ -1,0 +1,1 @@
+ALTER TABLE user_timeline DROP COLUMN pages;

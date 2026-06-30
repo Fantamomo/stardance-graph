@@ -5,13 +5,11 @@ import com.fantamomo.hc.stardancegraph.db.ProgramIterationsTable
 import com.fantamomo.hc.stardancegraph.manager.DatabaseManager
 import com.fantamomo.hc.stardancegraph.scrapen.Scraper
 import com.fantamomo.hc.stardancegraph.util.Logger
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import org.jetbrains.exposed.v1.r2dbc.insert
 import kotlin.properties.Delegates
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.minutes
 
 object App {
     private val logger = Logger()
@@ -64,7 +62,22 @@ object App {
     }
 
     private suspend fun run() {
-        logger.info("Initialized program iteration $programId")
-        Scraper.scrape()
+        logger.info("Initialized program with iteration $programId")
+        var first = true
+
+        while (true) {
+            try {
+                if (!first) {
+                    logger.info("")
+                }
+                first = false
+                Scraper.scrape()
+            } catch (e: Throwable) {
+                logger.error("Scraper failed, waiting for one hour", e)
+                repeat(60) { // we want to wait for 1 hour. but if we directly write 1.hours, we could not override it with the debugger if we don't want to wait for 1 hour
+                    delay(1.minutes)
+                }
+            }
+        }
     }
 }

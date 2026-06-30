@@ -76,6 +76,7 @@ object UserSiteParser {
         val internalId = main.selectFirst(".profile")?.attr("action")?.removePrefix("/users/")?.toIntOrNull()
         if (internalId == null) {
             logger.warn("Failed to find internal ID in $url")
+            return null
         }
 
         val joinedElement = profileSection.selectFirst(".profile__joined")

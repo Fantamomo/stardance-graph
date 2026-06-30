@@ -1,6 +1,7 @@
 package com.fantamomo.hc.stardancegraph.scrapen
 
 import com.fantamomo.hc.stardancegraph.db.*
+import com.fantamomo.hc.stardancegraph.db.timeline.*
 import com.fantamomo.hc.stardancegraph.manager.DatabaseManager
 import com.fantamomo.hc.stardancegraph.model.*
 import com.fantamomo.hc.stardancegraph.util.cachedLinkToSlack
@@ -393,6 +394,31 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ProjectTable.firstSeen] = requestId
             it[ProjectTable.lastRequested] = requestId
         }
+        ProjectTimelineTable.insert {
+            it[ProjectTimelineTable.id] = element.id
+            it[ProjectTimelineTable.title] = element.title
+            it[ProjectTimelineTable.description] = element.description
+
+            val bannerUrlString = element.bannerUrl?.toString()
+            if ((bannerUrlString?.length ?: 0) <= 300) {
+                it[ProjectTimelineTable.bannerImage] = bannerUrlString
+            } else {
+                logger.warn("Banner URL of project ${element.id} is too long: ${element.bannerUrl}")
+            }
+
+            it[ProjectTimelineTable.superstar] = element.superstar
+            it[ProjectTimelineTable.sourceUrl] = element.sourceUrl?.toString()
+            it[ProjectTimelineTable.followerCount] = element.followerCount
+            it[ProjectTimelineTable.devlogCount] = element.devlogCount
+            it[ProjectTimelineTable.totalHours] = element.hourCount
+            it[ProjectTimelineTable.postCount] = element.posts.size
+            it[ProjectTimelineTable.isHardware] = element.isHardware
+            it[ProjectTimelineTable.attachedMission] = element.attachedMission
+            it[ProjectTimelineTable.missionShipped] = element.missionShipped
+
+            it[ProjectTimelineTable.request] = requestId
+        }
+
         val existing = existingProjects[element.id] ?: false
         if (!existing) existingProjects[element.id] = true
         for (post in element.posts) {
@@ -495,7 +521,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
                 logger.warn("Banner URL of user @${element.name} is too long: ${element.bannerUrl}")
             }
 
-            if (element.internalId != null) it[UserTable.internalId] = element.internalId
+            it[UserTable.internalId] = element.internalId
             it[UserTable.verified] = true
 
             it[UserTable.joinData] = element.joinedDate
@@ -513,6 +539,21 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
             it[UserTable.firstSeen] = requestId
             it[UserTable.lastRequested] = requestId
+        }
+        UserTimelineTable.insert {
+            it[UserTimelineTable.internalId] = element.internalId
+
+            it[UserTimelineTable.bio] = element.bio
+            it[UserTimelineTable.projectCount] = element.projectsCount
+            it[UserTimelineTable.shipCount] = element.shipCount
+            it[UserTimelineTable.votesCount] = element.votesCount
+            it[UserTimelineTable.achievementsCount] = element.achievements.size
+            it[UserTimelineTable.followerCount] = element.followerCount
+            it[UserTimelineTable.followingCount] = element.followingCount
+            it[UserTimelineTable.streak] = element.streak
+            it[UserTimelineTable.devlogCount] = element.devlogCount
+
+            it[UserTimelineTable.request] = requestId
         }
         val existingType = existingUsers[element.name] ?: (-1).toByte()
         if (existingType < 2) existingUsers[element.name] = 2
@@ -553,6 +594,14 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[SuperstarTable.firstSeen] = requestId
             it[SuperstarTable.lastSeen] = requestId
         }
+        SuperstarTimelineTable.insert {
+            it[SuperstarTimelineTable.internalId] = element.internalId
+
+            it[SuperstarTimelineTable.views] = element.views
+            it[SuperstarTimelineTable.reposts] = element.reposts
+
+            it[SuperstarTimelineTable.request] = requestId
+        }
     }
 
     private suspend fun insertShipEvent(element: ShipEvent, requestId: Int) {
@@ -584,6 +633,20 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
             it[ShipEventTable.firstSeen] = requestId
             it[ShipEventTable.lastSeen] = requestId
+        }
+        ShipEventTimelineTable.insert {
+            it[ShipEventTimelineTable.internalId] = element.internalId
+
+            it[ShipEventTimelineTable.pending] = element.pending
+            it[ShipEventTimelineTable.returned] = element.returned
+            it[ShipEventTimelineTable.demoUrl] = element.demoUrl.toString()
+            it[ShipEventTimelineTable.repoUrl] = element.repoUrl.toString()
+            it[ShipEventTimelineTable.devlogCount] = element.devlogCount
+            it[ShipEventTimelineTable.hourCount] = element.hourCount
+            it[ShipEventTimelineTable.attachedMission] = element.mission
+            it[ShipEventTimelineTable.description] = element.body
+
+            it[ShipEventTimelineTable.request] = requestId
         }
         if (element.attachments.isNotEmpty()) {
             var attachmentsCount = 0
@@ -652,6 +715,19 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
 
             it[DevlogTable.firstSeen] = requestId
             it[DevlogTable.lastSeen] = requestId
+        }
+        DevlogTimelineTable.insert {
+            it[DevlogTimelineTable.id] = element.id
+
+            it[DevlogTimelineTable.content] = element.body
+            it[DevlogTimelineTable.attachmentsCount] = element.attachments.size
+
+            it[DevlogTimelineTable.comments] = element.commentsCount
+            it[DevlogTimelineTable.likes] = element.likesCount
+            it[DevlogTimelineTable.views] = element.viewsCount
+            it[DevlogTimelineTable.reposts] = element.repostsCount
+
+            it[DevlogTimelineTable.request] = requestId
         }
         if (element.attachments.isNotEmpty()) {
             var attachmentsCount = 0
