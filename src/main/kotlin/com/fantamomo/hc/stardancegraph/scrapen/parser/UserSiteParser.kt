@@ -386,13 +386,14 @@ object UserSiteParser {
     private fun parseLastUpdated(text: String, element: String, url: Url): Duration? {
         val durationText = text
             .removePrefix("Last updated ")
-            .removePrefix(" ago")
+            .removeSuffix(" ago")
             .replace("days", "d")
             .replace("day", "d")
             .replace("hours", "h")
             .replace("hour", "h")
             .replace("minutes", "m")
             .replace("minute", "m")
+            .replace(" ", "")
         return try {
             Duration.parse(durationText)
         } catch (e: Exception) {
