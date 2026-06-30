@@ -264,7 +264,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
     }
 
     private suspend fun insertUserFollowing(element: UserFollowing, requestId: Int) {
-        insertMissingUser(element.user, requestId)
+        insertMissingUser(element.user, requestId, parsed = false)
         for (follower in element.following) insertMissingUser(follower, requestId)
         UserFollowerTable.batchUpsert(
             element.following,
@@ -279,7 +279,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
     }
 
     private suspend fun insertUserFollowers(element: UserFollower, requestId: Int) {
-        insertMissingUser(element.user, requestId)
+        insertMissingUser(element.user, requestId, parsed = false)
         for (follower in element.follower) insertMissingUser(follower, requestId)
         UserFollowerTable.batchUpsert(
             element.follower,
@@ -294,7 +294,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
     }
 
     private suspend fun insertProjectFollowers(element: ProjectFollowers, requestId: Int) {
-        insertMissingProject(element.project, element.owner, requestId)
+        insertMissingProject(element.project, element.owner, requestId, parsedUser = false)
         for (follower in element.followers) insertMissingUser(follower, requestId)
         ProjectFollowersTable.batchUpsert(
             element.followers,
@@ -309,8 +309,8 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         }
     }
 
-    private suspend fun insertMissingProject(id: Int, owner: User, requestId: Int) {
-        insertMissingUser(owner, requestId)
+    private suspend fun insertMissingProject(id: Int, owner: User, requestId: Int, parsedUser: Boolean = true) {
+        insertMissingUser(owner, requestId, parsed = parsedUser)
         val existing = existingProjects[id]
         if (existing == null) {
             insertFoundProject(Project.FoundProject(id, owner), requestId)
@@ -426,9 +426,9 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
         }
     }
 
-    private suspend fun insertMissingUser(element: User, requestId: Int) {
+    private suspend fun insertMissingUser(element: User, requestId: Int, parsed: Boolean = true) {
         if (element is User.ScrapedUser) {
-            insertScrapedUser(element, requestId)
+            if (parsed) insertScrapedUser(element, requestId)
             return
         }
 

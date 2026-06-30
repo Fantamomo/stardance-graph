@@ -168,11 +168,11 @@ class ScrapEngine {
         ).max()
 
         for (i in 1..maxIterations) {
-            if (i <= INIT_PROJECTS_SCRAP) {
+            if (i <= 1) {
                 val project = Scrapable.Project(i)
                 sendToScrapUnique(project)
             }
-            if (i <= INIT_USERS_SCRAP) {
+            if (i <= 1) {
                 val user = Scrapable.UserId(i)
                 sendToScrapUnique(user)
             }
@@ -230,7 +230,7 @@ class ScrapEngine {
 
                     if (sendable is User.ScrapedUser) {
                         scrapedUsers.add(sendable.name)
-                        sendable.internalId?.let { scrapedUsers.add(it) }
+                        scrapedUsers.add(sendable.internalId)
                     } else if (sendable is User.UnverifiedUser) {
                         scrapedUsers.add(sendable.name)
                         sendable.internalId?.let { scrapedUsers.add(it) }

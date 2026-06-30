@@ -11,6 +11,9 @@ import org.jsoup.nodes.Element
 import java.time.format.DateTimeFormatter
 import java.util.*
 import kotlin.time.Duration
+import kotlin.time.DurationUnit
+import kotlin.time.times
+import kotlin.time.toDuration
 
 object UserSiteParser {
     private val logger = Logger()
@@ -387,6 +390,7 @@ object UserSiteParser {
     private fun parseLastUpdated(text: String, element: String, url: Url): Duration? {
         val durationText = text
             .removePrefix("Last updated ")
+            .removePrefix("about ")
             .removeSuffix(" ago")
             .replace("days", "d")
             .replace("day", "d")
@@ -395,6 +399,7 @@ object UserSiteParser {
             .replace("minutes", "m")
             .replace("minute", "m")
             .replace(" ", "")
+        if (durationText.endsWith("month")) return durationText.takeWhile { it.isDigit() }.toIntOrNull()?.let { it * 30.toDuration(DurationUnit.DAYS) }
         return try {
             Duration.parse(durationText)
         } catch (e: Exception) {
