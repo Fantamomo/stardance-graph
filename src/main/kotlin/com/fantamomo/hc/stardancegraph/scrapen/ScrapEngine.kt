@@ -14,7 +14,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
-import kotlinx.datetime.*
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toLocalDateTime
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.r2dbc.select
 import org.slf4j.LoggerFactory
@@ -153,7 +156,7 @@ class ScrapEngine {
         val fromRngScrapDate = when {
             dates.isEmpty() -> rngLaunchDate
             dates.first() == currentDate -> currentDate
-            else -> dates.first() + DatePeriod(days = 1)
+            else -> dates.first() // always scrap the same last scraped date (because maybe something has changed)
         }
 
         val rngDates = fromRngScrapDate.daysUntilSequence(currentDate).iterator()
