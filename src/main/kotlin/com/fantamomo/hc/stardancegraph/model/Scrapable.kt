@@ -49,6 +49,15 @@ sealed interface Scrapable {
         override val url: Url = Url("https://stardance.hackclub.com/@$name/following")
     }
 
+    data class UserProjects(
+        val name: String
+    ) : Scrapable {
+        init {
+            if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
+        }
+        override val url: Url = Url("https://stardance.hackclub.com/@$name/projects")
+    }
+
     data class Devlog(
         val project: Int,
         val id: Int

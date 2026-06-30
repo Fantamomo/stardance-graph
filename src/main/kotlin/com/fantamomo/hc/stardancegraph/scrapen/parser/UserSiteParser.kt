@@ -1,6 +1,8 @@
 package com.fantamomo.hc.stardancegraph.scrapen.parser
 
+import com.fantamomo.hc.stardancegraph.model.Project
 import com.fantamomo.hc.stardancegraph.model.User
+import com.fantamomo.hc.stardancegraph.model.UserProjects
 import com.fantamomo.hc.stardancegraph.util.Logger
 import io.ktor.http.*
 import kotlinx.datetime.LocalDate
@@ -8,6 +10,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.time.format.DateTimeFormatter
 import java.util.*
+import kotlin.time.Duration
 
 object UserSiteParser {
     private val logger = Logger()
@@ -253,5 +256,149 @@ object UserSiteParser {
             posts = posts,
             hasMorePages = hasMorePages
         )
+    }
+
+    fun parseUserProjects(html: Document, url: Url): UserProjects? {
+        val tabContent = html.selectFirst(".profile-tab-content")
+        if (tabContent == null) {
+            logger.warn("Failed to find projects section in $url")
+            return null
+        }
+
+        val userPanel = html.selectFirst(".profile__header")
+        if (userPanel == null) {
+            logger.warn("Failed to find user panel in ${tabContent.cssSelector()} from $url")
+            return null
+        }
+        val avatarUrlElement = userPanel.selectFirst(".profile__avatar")
+        if (avatarUrlElement == null) {
+            logger.warn("Failed to find avatar URL element in ${userPanel.cssSelector()} from $url")
+            return null
+        }
+        val avatarUrl = try {
+            Url(avatarUrlElement.attr("src"))
+        } catch (e: Exception) {
+            logger.warn("Failed to parse avatar URL in ${userPanel.cssSelector()} from $url", e)
+            return null
+        }
+        val usernameElement = userPanel.selectFirst(".profile__handle")
+        if (usernameElement == null) {
+            logger.warn("Failed to find username element in ${userPanel.cssSelector()} from $url")
+            return null
+        }
+        val usernameText = usernameElement.text().removePrefix("@")
+        if (usernameText.isBlank()) {
+            logger.warn("Failed to find username in ${userPanel.cssSelector()} from $url")
+            return null
+        }
+        val user = User.FoundUser(usernameText, avatarUrl.toString())
+
+        val projectsElement = tabContent.select(".profile-project-card")
+
+        val projects = mutableListOf<Project.UserProjectPageProject>()
+        for (projectElement in projectsElement) {
+            val projectLink = projectElement.attr("href")
+            if (projectLink.isBlank()) {
+                logger.warn("Failed to find project link in ${projectElement.cssSelector()} from $url")
+                continue
+            }
+            val id = projectLink.removePrefix("/projects/").toIntOrNull()
+            if (id == null) {
+                logger.warn("Failed to parse project id from $projectLink in ${projectElement.cssSelector()} from $url")
+                continue
+            }
+            val imageElement = projectElement.selectFirst(".profile-project-card__banner-img")
+            if (imageElement == null) {
+                logger.warn("Failed to find project image in ${projectElement.cssSelector()} from $url")
+                continue
+            }
+            val imageUrl = try {
+                Url(imageElement.attr("src"))
+            } catch (e: Exception) {
+                logger.warn("Failed to parse project image URL in ${projectElement.cssSelector()} from $url", e)
+                continue
+            }
+            val body = projectElement.selectFirst(".profile-project-card__body")
+            if (body == null) {
+                logger.warn("Failed to find project body in ${projectElement.cssSelector()} from $url")
+                continue
+            }
+            val titleElement = body.selectFirst(".profile-project-card__title")
+            if (titleElement == null) {
+                logger.warn("Failed to find project title in ${body.cssSelector()} from $url")
+                continue
+            }
+            val title = titleElement.text()
+            if (title.isBlank()) {
+                logger.warn("Failed to parse project title in ${titleElement.cssSelector()} from $url")
+                continue
+            }
+            val metaStats = body.select(".profile-project-card__meta-item")
+            val rawStats = mutableSetOf<String>()
+            for (statElement in metaStats) {
+                val label = statElement.selectFirst("span")?.text()
+                if (label == null) {
+                    logger.warn("Failed to find project stat label in ${statElement.cssSelector()} from $url")
+                    continue
+                }
+                if (label.isBlank()) {
+                    logger.warn("Failed to parse project stat label in ${statElement.cssSelector()} from $url")
+                    continue
+                }
+                rawStats.add(label)
+            }
+            val devlogCount = rawStats.firstOrNull { it.lowercase().contains("devlog") }?.trim()?.takeWhile { it.isDigit() }?.toIntOrNull()
+            val hourCount = rawStats.firstOrNull { it.lowercase().endsWith('h') }?.trim()?.takeWhile { it.isDigit() }?.toIntOrNull()
+
+            val descriptionElement = body.selectFirst(".profile-project-card__description")
+            val description = descriptionElement?.text() ?: ""
+
+            val lastUpdatedElement = body.selectFirst(".profile-project-card__updated")
+            if (lastUpdatedElement == null) {
+                logger.warn("Failed to find project last updated in ${body.cssSelector()} from $url")
+                continue
+            }
+            val lastUpdatedText = lastUpdatedElement.text()
+            if (lastUpdatedText.isBlank()) {
+                logger.warn("Failed to parse project last updated in ${lastUpdatedElement.cssSelector()} from $url")
+                continue
+            }
+            val lastUpdated = parseLastUpdated(lastUpdatedText, lastUpdatedElement.cssSelector(), url) ?: continue
+            projects.add(
+                Project.UserProjectPageProject(
+                    id = id,
+                    owner = user,
+                    title = title,
+                    bannerUrl = imageUrl,
+                    description = description,
+                    devlogCount = devlogCount ?: 0,
+                    hoursCount = hourCount ?: 0,
+                    lastUpdated = lastUpdated
+                )
+            )
+        }
+        return UserProjects(
+            user = user,
+            projects = projects.toList()
+        )
+    }
+
+    private fun parseLastUpdated(text: String, element: String, url: Url): Duration? {
+        val durationText = text
+            .removePrefix("Last updated ")
+            .removeSuffix(" ago")
+            .replace("days", "d")
+            .replace("day", "d")
+            .replace("hours", "h")
+            .replace("hour", "h")
+            .replace("minutes", "m")
+            .replace("minute", "m")
+            .replace(" ", "")
+        return try {
+            Duration.parse(durationText)
+        } catch (e: Exception) {
+            logger.warn("Failed to parse last updated '$durationText'(raw: '$text') in $element in $url", e)
+            null
+        }
     }
 }
