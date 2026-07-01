@@ -15,6 +15,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.toSet
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
@@ -201,26 +202,35 @@ class ScrapEngine {
         val firstSeenRequest = RequestTable.alias("firstSeenRequest")
         val lastRequestedRequest = RequestTable.alias("lastRequestedRequest")
 
-        val usersToScrap: List<ScrapableUser> = DatabaseManager.transaction {
-            val existingNames = UserTable
+        return DatabaseManager.transaction {
+            val existingUsers = UserTable
                 .select(UserTable.name, UserTable.internalId)
-                .where { UserTable.name.isNull() }
-                .map { it[UserTable.name] }
-                .toList()
-
-            val existingIds = UserTable
-                .select(UserTable.internalId)
-                .where { UserTable.internalId.isNotNull() }
-                .map { it[UserTable.internalId]!! }
-                .toList()
+                .map {
+                    it[UserTable.name] to it[UserTable.internalId]
+                }
+                .toSet()
 
             // fast path, if there are no users in the database, we need to scrape all users
-            if (existingNames.isEmpty() && existingIds.isEmpty()) return@transaction if (maxUsersId < 1) emptyList() else @Suppress("EmptyRange") (1..maxUsersId).map { Scrapable.UserId(it) }
+            if (existingUsers.isEmpty()) {
+                return@transaction if (maxUsersId > 0) {
+                    @Suppress("EmptyRange")
+                    (1..maxUsersId).map { Scrapable.UserId(it) }
+                } else emptyList()
+            }
 
-            val missingIds = if (maxUsersId < 1) emptyList()
-            else @Suppress("EmptyRange") (1..maxUsersId).filter { it !in existingIds }
+            val existingIds = existingUsers
+                .mapNotNullTo(mutableSetOf()) { it.second }
 
-            val eligibleUserIds = UserTable
+            val missingIds = if (maxUsersId > 0) {
+                @Suppress("EmptyRange")
+                (1..maxUsersId)
+                    .asSequence()
+                    .filterNot(existingIds::contains)
+                    .map(Scrapable::UserId)
+                    .toList()
+            } else emptyList()
+
+            val eligibleUsers = UserTable
                 .join(
                     firstSeenRequest,
                     JoinType.INNER,
@@ -245,16 +255,22 @@ class ScrapEngine {
                             (firstSeenRequest[RequestTable.requestedAt] greater oneDayAgo) or // we are scraping users that we first found less than a day ago
                             (lastRequestedRequest[RequestTable.requestedAt] lessEq oneDayAgo) // we are scraping users that we last scraped more than a day ago
                 }
-                .map { it[UserTable.name] to it[UserTable.internalId] }
-                .toList()
+                .map {
+                    it[UserTable.name] to it[UserTable.internalId]
+                }
+                .toSet()
 
-            missingIds.map { Scrapable.UserId(it) } +
-                    eligibleUserIds.map { Scrapable.User(it.first) } +
-                    eligibleUserIds.mapNotNull { it.second?.let { id -> Scrapable.UserId(id) } }
+            buildList {
+                addAll(missingIds)
+
+                eligibleUsers.forEach { (name, id) ->
+                    add(Scrapable.User(name))
+                    id?.let { add(Scrapable.UserId(it)) }
+                }
+            }
         }
-
-        return usersToScrap.distinct()
     }
+
 
     private suspend fun getProjectsToScrap(maxProjectId: Int = 0): List<Int> {
         val oneDayAgo = Clock.System.now() - 1.days
@@ -266,13 +282,16 @@ class ScrapEngine {
             val existingIds = ProjectTable
                 .select(ProjectTable.id)
                 .map { it[ProjectTable.id] }
-                .toList()
+                .toSet()
 
             // fast path, if there are no projects in the database, we need to scrape all projects
             if (existingIds.isEmpty()) return@transaction if (maxProjectId < 1) emptyList() else @Suppress("EmptyRange") (1..maxProjectId).toList()
 
             val missingIds = if (maxProjectId < 1) emptyList()
-            else @Suppress("EmptyRange") (1..maxProjectId).filter { it !in existingIds }
+            else @Suppress("EmptyRange") (1..maxProjectId)
+                .asSequence()
+                .filterNot { it in existingIds }
+                .toSet()
 
             val eligibleProjectIds = ProjectTable
                 .join(
@@ -297,7 +316,7 @@ class ScrapEngine {
                             (lastRequestedRequest[RequestTable.requestedAt] lessEq oneDayAgo)
                 }
                 .map { it[ProjectTable.id] }
-                .toList()
+                .toSet()
 
             missingIds + eligibleProjectIds
         }
