@@ -230,7 +230,7 @@ class ScrapEngine {
 
                     if (sendable is User.ScrapedUser) {
                         scrapedUsers.add(sendable.name)
-                        sendable.internalId?.let { scrapedUsers.add(it) }
+                        scrapedUsers.add(sendable.internalId)
                     } else if (sendable is User.UnverifiedUser) {
                         scrapedUsers.add(sendable.name)
                         sendable.internalId?.let { scrapedUsers.add(it) }

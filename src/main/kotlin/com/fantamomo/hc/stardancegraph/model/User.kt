@@ -65,7 +65,7 @@ sealed interface User : Sendable {
         override val name: String,
         override val avatarUrl: String,
         val bannerUrl: Url?,
-        val internalId: Int?,
+        val internalId: Int,
         val joinedDate: LocalDate,
         val bio: String,
         val devlogCount: Int,

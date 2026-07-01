@@ -1,0 +1,1 @@
+ALTER TABLE project_timeline ALTER COLUMN banner_image DROP NOT NULL;

@@ -39,7 +39,11 @@ object Scraper {
         val job = scope.async {
             start()
         }
-        return job.await()
+        try {
+            return job.await()
+        } finally {
+            running.store(false)
+        }
     }
 
     private suspend fun start(): RequestStatistics {

@@ -1,0 +1,1 @@
+ALTER TABLE projects ALTER COLUMN banner_image TYPE VARCHAR(500);

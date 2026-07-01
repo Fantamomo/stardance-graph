@@ -3,7 +3,7 @@ package com.fantamomo.hc.stardancegraph.util
 import io.ktor.http.*
 
 fun cachedLinkToSlack(link: Url): String? {
-    if (link.host != "cachet.hackclub.com") return null
+    if (link.host != "cachet.hackclub.com" && link.host != "cachet.dunkirk.sh") return null
     val path = link.encodedPath.removePrefix("/")
     if (!path.startsWith("users/U")) return null
     if (!path.endsWith("/r")) return null
