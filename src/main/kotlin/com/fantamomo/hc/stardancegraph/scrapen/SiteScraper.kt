@@ -8,6 +8,7 @@ import com.fantamomo.hc.stardancegraph.scrapen.parser.*
 import com.fantamomo.hc.stardancegraph.util.RateLimiter
 import com.fantamomo.hc.stardancegraph.util.ServerLoadController
 import com.fantamomo.hc.stardancegraph.util.delay.waitingDelay
+import com.fantamomo.hc.stardancegraph.util.exceptions.GhostProjectException
 import com.fantamomo.hc.stardancegraph.util.plugins.network.RECEIVE_BYTES_KEY
 import com.fantamomo.hc.stardancegraph.util.plugins.network.SEND_BYTES_KEY
 import com.fantamomo.hc.stardancegraph.util.plugins.requests.RequestType
@@ -344,10 +345,15 @@ class SiteScraper(
                 is Scrapable.UserFollowers -> FollowParser.parseUserFollowers(html, element.url, element.user)
                 is Scrapable.UserFollowing -> FollowParser.parseUserFollowing(html, element.url, element.user)
                 is Scrapable.RngPage -> RngParser.parse(html, element.url, element.page, element.date)
-                is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $element") // should never happen
                 is Scrapable.UserProjects -> UserSiteParser.parseUserProjects(html, element.url)
+                is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $element") // should never happen
             }
         } catch (e: Exception) {
+            if (e is GhostProjectException) {
+                // see comments on GhostProjectException for explanation
+                logger.warn("Ghost project detected: ${element.url}")
+                return scrapedObject.build()
+            }
             logger.error("Failed to analyze ${element.url}", e)
             toScrap.retry()
             return scrapedObject.build()
