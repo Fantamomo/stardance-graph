@@ -3,6 +3,7 @@ package com.fantamomo.hc.stardancegraph.scrapen.parser
 import com.fantamomo.hc.stardancegraph.model.Project
 import com.fantamomo.hc.stardancegraph.model.User
 import com.fantamomo.hc.stardancegraph.util.Logger
+import com.fantamomo.hc.stardancegraph.util.exceptions.GhostProjectException
 import io.ktor.http.*
 import org.jsoup.nodes.Element
 
@@ -35,8 +36,8 @@ object ProjectParser {
 
         val authorAvatarElement = panel.selectFirst(".project-show__avatar")
         if (authorAvatarElement == null) {
-            logger.error("Failed to find author avatar element in $url")
-            return null
+//            logger.error("Failed to find author avatar element in $url")
+            throw GhostProjectException()
         }
         val authorAvatarUrlText =
             // didn't know this, but some users don't have avatars, which completely breaks my code,

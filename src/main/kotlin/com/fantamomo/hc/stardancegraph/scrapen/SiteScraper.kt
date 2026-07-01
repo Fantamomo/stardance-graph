@@ -8,6 +8,7 @@ import com.fantamomo.hc.stardancegraph.scrapen.parser.*
 import com.fantamomo.hc.stardancegraph.util.RateLimiter
 import com.fantamomo.hc.stardancegraph.util.ServerLoadController
 import com.fantamomo.hc.stardancegraph.util.delay.waitingDelay
+import com.fantamomo.hc.stardancegraph.util.exceptions.GhostProjectException
 import com.fantamomo.hc.stardancegraph.util.plugins.network.RECEIVE_BYTES_KEY
 import com.fantamomo.hc.stardancegraph.util.plugins.network.SEND_BYTES_KEY
 import com.fantamomo.hc.stardancegraph.util.plugins.requests.RequestType
@@ -67,6 +68,7 @@ class SiteScraper(
 
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val scrapedCount = AtomicInt(0)
+    private val totalReceivedElements = AtomicInt(0)
 
     private val rateLimited = AtomicBoolean(false)
     private var rateLimitedUntil: Instant? = null
@@ -181,6 +183,9 @@ class SiteScraper(
             }
             if (result == null) {
                 continue
+            }
+            if (totalReceivedElements.incrementAndFetch() % 100 == 0) {
+                logger.info("Status: total received elements: ${totalReceivedElements.load()}; scraped sites: ${scrapedCount.load()}; work to do: ${engine.currentWork.load()}")
             }
             return@withLock result
         }
@@ -340,10 +345,15 @@ class SiteScraper(
                 is Scrapable.UserFollowers -> FollowParser.parseUserFollowers(html, element.url, element.user)
                 is Scrapable.UserFollowing -> FollowParser.parseUserFollowing(html, element.url, element.user)
                 is Scrapable.RngPage -> RngParser.parse(html, element.url, element.page, element.date)
-                is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $element") // should never happen
                 is Scrapable.UserProjects -> UserSiteParser.parseUserProjects(html, element.url)
+                is Scrapable.WrappedScrapable<*> -> throw IllegalStateException("Unexpected wrapped scrapable: $element") // should never happen
             }
         } catch (e: Exception) {
+            if (e is GhostProjectException) {
+                // see comments on GhostProjectException for explanation
+                logger.warn("Ghost project detected: ${element.url}")
+                return scrapedObject.build()
+            }
             logger.error("Failed to analyze ${element.url}", e)
             toScrap.retry()
             return scrapedObject.build()
@@ -436,7 +446,7 @@ class SiteScraper(
 
         private const val MAX_CONCURRENT_REQUESTS = 5
 
-        private const val SERVER_RATE_LIMIT_PER_MINUTE = 120
+        const val SERVER_RATE_LIMIT_PER_MINUTE = 120
         private const val SERVER_RATE_LIMIT_PER_5_MINUTES = 600
 
         private val devFooterRegex = Regex(

@@ -344,7 +344,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ProjectTable.lastUpdatedAt] = requestId
 
             it[ProjectTable.firstSeen] = requestId
-            it[ProjectTable.lastRequested] = requestId
+            it[ProjectTable.lastSeen] = requestId
         }
     }
 
@@ -357,7 +357,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ProjectTable.owner] = element.owner.name
 
             it[ProjectTable.firstSeen] = requestId
-            it[ProjectTable.lastRequested] = requestId
+            it[ProjectTable.lastSeen] = requestId
         }
         existingProjects.putIfAbsent(element.id, false)
     }
@@ -392,6 +392,7 @@ class DatabaseWriter(val engine: ScrapEngine, val channel: ReceiveChannel<Scrape
             it[ProjectTable.missionShipped] = element.missionShipped
 
             it[ProjectTable.firstSeen] = requestId
+            it[ProjectTable.lastSeen] = requestId
             it[ProjectTable.lastRequested] = requestId
         }
         ProjectTimelineTable.insert {

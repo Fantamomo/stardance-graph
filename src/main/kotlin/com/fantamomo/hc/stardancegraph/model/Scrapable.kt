@@ -9,7 +9,7 @@ sealed interface Scrapable {
 
     data class User(
         val name: String
-    ) : Scrapable {
+    ) : Scrapable, ScrapableUser {
         init {
             if (name.contains("@")) throw IllegalArgumentException("User name cannot contain an @")
         }
@@ -19,7 +19,7 @@ sealed interface Scrapable {
 
     data class UserId(
         val id: Int
-    ) : Scrapable {
+    ) : Scrapable, ScrapableUser {
         override val url: Url = Url("https://stardance.hackclub.com/users/$id")
     }
 

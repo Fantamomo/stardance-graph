@@ -1,31 +1,36 @@
 package com.fantamomo.hc.stardancegraph.scrapen
 
+import com.fantamomo.hc.stardancegraph.db.ProjectTable
+import com.fantamomo.hc.stardancegraph.db.RequestTable
 import com.fantamomo.hc.stardancegraph.db.RngTable
+import com.fantamomo.hc.stardancegraph.db.UserTable
 import com.fantamomo.hc.stardancegraph.manager.DatabaseManager
-import com.fantamomo.hc.stardancegraph.model.Project
-import com.fantamomo.hc.stardancegraph.model.Scrapable
-import com.fantamomo.hc.stardancegraph.model.ScrapedObject
-import com.fantamomo.hc.stardancegraph.model.User
+import com.fantamomo.hc.stardancegraph.model.*
 import com.fantamomo.hc.stardancegraph.scrapen.data.SiteStats
 import com.fantamomo.hc.stardancegraph.util.daysUntilSequence
+import com.fantamomo.hc.stardancegraph.util.humanReadable
 import io.ktor.http.*
 import io.ktor.util.collections.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.toSet
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
-import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.r2dbc.select
 import org.slf4j.LoggerFactory
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.concurrent.atomics.incrementAndFetch
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.measureTime
+import kotlin.time.times
 
 class ScrapEngine {
     // elements that are sent to the database so that they can be written to the database
@@ -132,6 +137,194 @@ class ScrapEngine {
     }
 
     private suspend fun start() {
+        logger.info("Calculating initial projects/users to scrape, this might take a while...")
+
+        val (rngScrapCount, rngDates) = getRngIterator()
+
+        logger.info("Found $rngScrapCount initial daily random number sites to scrape (this number is not near the actual number of scrapes)")
+
+        val projectsToScrap = try {
+            getProjectsToScrap(INIT_PROJECTS_SCRAP)
+        } catch (e: Exception) {
+            logger.error("Failed to get projects to scrape from the database, falling back to all projects", e)
+            (1..INIT_PROJECTS_SCRAP).toList()
+        }
+        logger.info("Found ${projectsToScrap.size} projects to scrape")
+
+        val usersToScrap = try {
+            getUsersToScrap(INIT_USERS_SCRAP)
+        } catch (e: Exception) {
+            logger.error("Failed to get users to scrape from the database, falling back to all users", e)
+            (1..INIT_USERS_SCRAP).map { Scrapable.UserId(it) }
+        }
+        logger.info("Found ${usersToScrap.size} users to scrape")
+
+        val totalItemsToScrape = projectsToScrap.size + usersToScrap.size + rngScrapCount
+        logger.info("Found a total of $totalItemsToScrape initial scrapes to perform. (this number will increase as we found more links and pages)")
+
+        val delayBetweenRequests = (60_000.0 / SiteScraper.SERVER_RATE_LIMIT_PER_MINUTE).milliseconds
+        val estimatedCompletionTime = totalItemsToScrape * delayBetweenRequests
+
+        logger.info("Estimates time to finish: ${estimatedCompletionTime.humanReadable()}")
+        logger.info("(this duration is the minimum time it will take to finish scraping all projects and users, it will increase as we found more links and pages)")
+
+        val maxIterations = listOf(
+            projectsToScrap.size,
+            usersToScrap.size,
+            rngScrapCount
+        ).max()
+
+        val projectIterator = projectsToScrap.iterator()
+        val userIterator = usersToScrap.iterator()
+
+        logger.info("Sending initial scrapes to site scraper")
+        for (i in 1..maxIterations) {
+            if (projectIterator.hasNext()) {
+                val projectId = projectIterator.next()
+                val element = Scrapable.Project(projectId)
+                sendToScrapUnique(element)
+            }
+            if (userIterator.hasNext()) {
+                val user = userIterator.next()
+                sendToScrapUnique(user)
+            }
+            if (rngDates.hasNext()) {
+                val rngPage = Scrapable.RngPage(rngDates.next())
+                sendToScrapUnique(rngPage)
+            }
+        }
+        logger.info("Finished sending initial scrapes to site scraper")
+    }
+
+    private suspend fun getUsersToScrap(maxUsersId: Int = 0): List<ScrapableUser> {
+        val oneDayAgo = Clock.System.now() - 1.days
+
+        val firstSeenRequest = RequestTable.alias("firstSeenRequest")
+        val lastRequestedRequest = RequestTable.alias("lastRequestedRequest")
+
+        return DatabaseManager.transaction {
+            val existingUsers = UserTable
+                .select(UserTable.name, UserTable.internalId)
+                .map {
+                    it[UserTable.name] to it[UserTable.internalId]
+                }
+                .toSet()
+
+            // fast path, if there are no users in the database, we need to scrape all users
+            if (existingUsers.isEmpty()) {
+                return@transaction if (maxUsersId > 0) {
+                    @Suppress("EmptyRange")
+                    (1..maxUsersId).map { Scrapable.UserId(it) }
+                } else emptyList()
+            }
+
+            val existingIds = existingUsers
+                .mapNotNullTo(mutableSetOf()) { it.second }
+
+            val missingIds = if (maxUsersId > 0) {
+                @Suppress("EmptyRange")
+                (1..maxUsersId)
+                    .asSequence()
+                    .filterNot(existingIds::contains)
+                    .map(Scrapable::UserId)
+                    .toList()
+            } else emptyList()
+
+            val eligibleUsers = UserTable
+                .join(
+                    firstSeenRequest,
+                    JoinType.INNER,
+                    UserTable.firstSeen,
+                    firstSeenRequest[RequestTable.id]
+                )
+                .join(
+                    lastRequestedRequest,
+                    JoinType.INNER,
+                    UserTable.lastRequested,
+                    lastRequestedRequest[RequestTable.id]
+                )
+                .select(UserTable.name, UserTable.internalId)
+                .where {
+                    (UserTable.devlogCount greater 0) or
+//                            (UserTable.projectCount greater 0) or // we are not including projects in this list, because many users have one project without a devlog
+                            (UserTable.shipCount greater 0) or
+                            (UserTable.votesCount greater 0) or
+                            (UserTable.followerCount greater 0) or
+                            (UserTable.streak.isNotNull()) or
+                            (UserTable.pages greater 1) or
+                            (firstSeenRequest[RequestTable.requestedAt] greater oneDayAgo) or // we are scraping users that we first found less than a day ago
+                            (lastRequestedRequest[RequestTable.requestedAt] lessEq oneDayAgo) // we are scraping users that we last scraped more than a day ago
+                }
+                .map {
+                    it[UserTable.name] to it[UserTable.internalId]
+                }
+                .toSet()
+
+            buildList {
+                addAll(missingIds)
+
+                eligibleUsers.forEach { (name, id) ->
+                    add(Scrapable.User(name))
+                    id?.let { add(Scrapable.UserId(it)) }
+                }
+            }
+        }
+    }
+
+
+    private suspend fun getProjectsToScrap(maxProjectId: Int = 0): List<Int> {
+        val oneDayAgo = Clock.System.now() - 1.days
+
+        val firstSeenRequest = RequestTable.alias("firstSeenRequest")
+        val lastRequestedRequest = RequestTable.alias("lastRequestedRequest")
+
+        val projectsToScrap = DatabaseManager.transaction {
+            val existingIds = ProjectTable
+                .select(ProjectTable.id)
+                .map { it[ProjectTable.id] }
+                .toSet()
+
+            // fast path, if there are no projects in the database, we need to scrape all projects
+            if (existingIds.isEmpty()) return@transaction if (maxProjectId < 1) emptyList() else @Suppress("EmptyRange") (1..maxProjectId).toList()
+
+            val missingIds = if (maxProjectId < 1) emptyList()
+            else @Suppress("EmptyRange") (1..maxProjectId)
+                .asSequence()
+                .filterNot { it in existingIds }
+                .toSet()
+
+            val eligibleProjectIds = ProjectTable
+                .join(
+                    firstSeenRequest,
+                    JoinType.INNER,
+                    ProjectTable.firstSeen,
+                    firstSeenRequest[RequestTable.id]
+                )
+                .join(
+                    lastRequestedRequest,
+                    JoinType.INNER,
+                    ProjectTable.lastRequested,
+                    lastRequestedRequest[RequestTable.id]
+                )
+                .select(ProjectTable.id)
+                .where {
+                    (ProjectTable.followerCount greater 0) or
+                            (ProjectTable.devlogCount greater 0) or
+                            (ProjectTable.totalHours greater 0) or
+                            (ProjectTable.postCount greater 0) or
+                            (firstSeenRequest[RequestTable.requestedAt] greater oneDayAgo) or
+                            (lastRequestedRequest[RequestTable.requestedAt] lessEq oneDayAgo)
+                }
+                .map { it[ProjectTable.id] }
+                .toSet()
+
+            missingIds + eligibleProjectIds
+        }
+
+        return projectsToScrap.distinct()
+    }
+
+    private suspend fun getRngIterator(): Pair<Int, Iterator<LocalDate>> {
         val dates = try {
             DatabaseManager.transaction {
                 RngTable.select(RngTable.date)
@@ -161,26 +354,7 @@ class ScrapEngine {
 
         val rngDates = fromRngScrapDate.daysUntilSequence(currentDate).iterator()
 
-        val maxIterations = listOf(
-            INIT_PROJECTS_SCRAP,
-            INIT_USERS_SCRAP,
-            fromRngScrapDate.daysUntil(currentDate)
-        ).max()
-
-        for (i in 1..maxIterations) {
-            if (i <= INIT_PROJECTS_SCRAP) {
-                val project = Scrapable.Project(i)
-                sendToScrapUnique(project)
-            }
-            if (i <= INIT_USERS_SCRAP) {
-                val user = Scrapable.UserId(i)
-                sendToScrapUnique(user)
-            }
-            if (rngDates.hasNext()) {
-                val rngPage = Scrapable.RngPage(rngDates.next())
-                sendToScrapUnique(rngPage)
-            }
-        }
+        return fromRngScrapDate.daysUntil(currentDate) to rngDates
     }
 
     private suspend fun CoroutineScope.waitForStop() {
@@ -284,11 +458,11 @@ class ScrapEngine {
                 success
                 if (project404ErrorCount.load() > 100) {
                     logger.info("No more work, stopping")
-                    try {
-                        foundChannel.close()
-                    } catch (e: Exception) {
-                        logger.error("Error closing foundChannel", e)
-                    }
+//                    try {
+//                        foundChannel.close()
+//                    } catch (e: Exception) {
+//                        logger.error("Error closing foundChannel", e)
+//                    }
                     try {
                         toScrapeChannel.close()
                     } catch (e: Exception) {
@@ -373,9 +547,10 @@ class ScrapEngine {
     companion object {
         private val logger = LoggerFactory.getLogger(ScrapEngine::class.java)
 
-        // testing only: limits the scrap-engine to a specific number of scrapes
+        // limits the scrap-engine to a specific number of scrapes (it is nearly impossible to get to that many scrapes)
         private const val LIMIT_SCRAPES = Int.MAX_VALUE / 2
-        private const val INIT_PROJECTS_SCRAP = 20000
-        private const val INIT_USERS_SCRAP = 35300
+
+        private const val INIT_PROJECTS_SCRAP = 29330
+        private const val INIT_USERS_SCRAP = 39500
     }
 }
