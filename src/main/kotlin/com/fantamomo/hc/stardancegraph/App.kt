@@ -63,14 +63,9 @@ object App {
 
     private suspend fun run() {
         logger.info("Initialized program with iteration $programId")
-        var first = true
 
         while (true) {
             try {
-                if (!first) {
-                    logger.info("")
-                }
-                first = false
                 Scraper.scrape()
             } catch (e: Throwable) {
                 logger.error("Scraper failed, waiting for one hour", e)

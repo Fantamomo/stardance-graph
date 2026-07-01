@@ -26,6 +26,7 @@ object ProjectTable : Table("projects") {
     val lastUpdatedAt = reference("last_updated_at", RequestTable.id).nullable() // the request id of the last time the project was scraped and the lastUpdated field was retrived
 
     val firstSeen = reference("first_seen", RequestTable.id)
+    val lastSeen = reference("last_seen", RequestTable.id)
     val lastRequested = reference("last_requested", RequestTable.id)
 
     override val primaryKey = PrimaryKey(id)

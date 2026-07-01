@@ -67,6 +67,7 @@ class SiteScraper(
 
     private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val scrapedCount = AtomicInt(0)
+    private val totalReceivedElements = AtomicInt(0)
 
     private val rateLimited = AtomicBoolean(false)
     private var rateLimitedUntil: Instant? = null
@@ -181,6 +182,9 @@ class SiteScraper(
             }
             if (result == null) {
                 continue
+            }
+            if (totalReceivedElements.incrementAndFetch() % 100 == 0) {
+                logger.info("Status: total received elements: ${totalReceivedElements.load()}; scraped sites: ${scrapedCount.load()}; work to do: ${engine.currentWork.load()}")
             }
             return@withLock result
         }
@@ -436,7 +440,7 @@ class SiteScraper(
 
         private const val MAX_CONCURRENT_REQUESTS = 5
 
-        private const val SERVER_RATE_LIMIT_PER_MINUTE = 120
+        const val SERVER_RATE_LIMIT_PER_MINUTE = 120
         private const val SERVER_RATE_LIMIT_PER_5_MINUTES = 600
 
         private val devFooterRegex = Regex(
